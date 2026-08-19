@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Light palette is the base definition. Dark redefines ONLY the tokens, in both
+   the system-preference form and the explicit-attribute form, so all three theme
+   states resolve. No component may declare a color outside this block. */
+:root {
+  --ground: #eff2f0;
+  --surface: #fbfcfb; --surface-2: #f1f4f2; --surface-3: #e6ebe8;
+  --ink: #141c19; --ink-2: #4a5854; --ink-3: #7c8a85;
+  --line: #d8e0db; --line-2: #c3cfc9;
+  --accent: #276b5a; --accent-soft: #dceae4; --accent-ink: #194c40;
+  --alert: #b93c22; --alert-soft: #f6dfd8;
+  --rest: #3c6e8f; --rest-soft: #dee9f1; --rest-ink: #2a5471;
+  --warn: #8a6512; --warn-soft: #f4ebd4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0d1210;
+    --surface: #18211d; --surface-2: #1e2823; --surface-3: #26312b;
+    --ink: #e4ede8; --ink-2: #a3b2ac; --ink-3: #75847e;
+    --line: #2c3833; --line-2: #3a4842;
+    --accent: #4fb79b; --accent-soft: #1c332c; --accent-ink: #8fd8c4;
+    --alert: #f0765c; --alert-soft: #3a1d16;
+    --rest: #6facd0; --rest-soft: #1a2a35; --rest-ink: #9ccbe4;
+    --warn: #d9ae55; --warn-soft: #33290f;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0d1210;
+  --surface: #18211d; --surface-2: #1e2823; --surface-3: #26312b;
+  --ink: #e4ede8; --ink-2: #a3b2ac; --ink-3: #75847e;
+  --line: #2c3833; --line-2: #3a4842;
+  --accent: #4fb79b; --accent-soft: #1c332c; --accent-ink: #8fd8c4;
+  --alert: #f0765c; --alert-soft: #3a1d16;
+  --rest: #6facd0; --rest-soft: #1a2a35; --rest-ink: #9ccbe4;
+  --warn: #d9ae55; --warn-soft: #33290f;
+}
+
+@layer base {
+  body {
+    @apply bg-ground text-ink font-sans antialiased;
+    /* The app owns its window chrome; never let the page rubber-band. */
+    overscroll-behavior: none;
+  }
+  /* Digits that sit in columns must not jitter as they count down. */
+  .tabular { font-variant-numeric: tabular-nums; }
+}

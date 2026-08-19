@@ -1,0 +1,1135 @@
+<title>TimeBox Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#EFF2F0; --desk-a:#DDE6E1; --desk-b:#C4D4CC;
+  --surface:#FBFCFB; --surface-2:#F1F4F2; --surface-3:#E6EBE8;
+  --ink:#141C19; --ink-2:#4A5854; --ink-3:#7C8A85;
+  --line:#D8E0DB; --line-2:#C3CFC9;
+  --accent:#276B5A; --accent-soft:#DCEAE4; --accent-ink:#194C40;
+  --alert:#B93C22; --alert-soft:#F6DFD8;
+  --rest:#3C6E8F; --rest-soft:#DEE9F1; --rest-ink:#2A5471;
+  --warn:#8A6512; --warn-soft:#F4EBD4;
+  --menubar:rgba(250,252,251,.72); --menubar-ink:#1B2622;
+  --shadow:0 20px 50px -12px rgba(12,30,24,.34), 0 2px 6px rgba(12,30,24,.10);
+  --radius:12px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0D1210; --desk-a:#111A16; --desk-b:#08100D;
+    --surface:#18211D; --surface-2:#1E2823; --surface-3:#26312B;
+    --ink:#E4EDE8; --ink-2:#A3B2AC; --ink-3:#75847E;
+    --line:#2C3833; --line-2:#3A4842;
+    --accent:#4FB79B; --accent-soft:#1C332C; --accent-ink:#8FD8C4;
+    --alert:#F0765C; --alert-soft:#3A1D16;
+    --rest:#6FAECF; --rest-soft:#1A2A35; --rest-ink:#9CCBE4;
+    --warn:#D9AE55; --warn-soft:#33290F;
+    --menubar:rgba(16,22,19,.74); --menubar-ink:#DCE7E2;
+    --shadow:0 22px 55px -14px rgba(0,0,0,.7), 0 2px 6px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0D1210; --desk-a:#111A16; --desk-b:#08100D;
+  --surface:#18211D; --surface-2:#1E2823; --surface-3:#26312B;
+  --ink:#E4EDE8; --ink-2:#A3B2AC; --ink-3:#75847E;
+  --line:#2C3833; --line-2:#3A4842;
+  --accent:#4FB79B; --accent-soft:#1C332C; --accent-ink:#8FD8C4;
+  --alert:#F0765C; --alert-soft:#3A1D16;
+  --rest:#6FAECF; --rest-soft:#1A2A35; --rest-ink:#9CCBE4;
+  --warn:#D9AE55; --warn-soft:#33290F;
+  --menubar:rgba(16,22,19,.74); --menubar-ink:#DCE7E2;
+  --shadow:0 22px 55px -14px rgba(0,0,0,.7), 0 2px 6px rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  font-size:14px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3{margin:0;text-wrap:balance}
+
+/* ---------- page frame ---------- */
+.page{max-width:1180px;margin:0 auto;padding:26px 20px 60px}
+.masthead{display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px 28px;margin-bottom:18px}
+.masthead h1{font-size:20px;font-weight:600;letter-spacing:-.01em}
+.masthead p{margin:0;color:var(--ink-2);max-width:62ch;font-size:13px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+
+/* ---------- prototype control rail ---------- */
+.rail{
+  display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;
+  border:1px dashed var(--line-2);border-radius:10px;padding:10px 14px;margin-bottom:16px;
+  background:var(--surface-2);
+}
+.rail-label{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.seg{display:flex;border:1px solid var(--line-2);border-radius:7px;overflow:hidden}
+.seg button{padding:4px 11px;font-size:12px;color:var(--ink-2);border-right:1px solid var(--line-2)}
+.seg button:last-child{border-right:none}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.rail .hint{font-size:12px;color:var(--ink-3)}
+
+/* ---------- fake desktop ---------- */
+.desktop{
+  position:relative;border-radius:14px;overflow:hidden;
+  background:
+    radial-gradient(120% 90% at 18% -10%, var(--desk-a), transparent 60%),
+    radial-gradient(100% 110% at 92% 100%, var(--desk-b), transparent 62%),
+    linear-gradient(160deg, var(--desk-a), var(--desk-b));
+  border:1px solid var(--line-2);
+  min-height:660px;
+  box-shadow:inset 0 0 90px rgba(0,0,0,.06);
+}
+
+/* menu bar */
+.menubar{
+  position:relative;z-index:40;height:26px;display:flex;align-items:center;gap:18px;
+  padding:0 12px;background:var(--menubar);backdrop-filter:blur(18px);
+  border-bottom:1px solid rgba(0,0,0,.06);color:var(--menubar-ink);font-size:12.5px;
+}
+.menubar .sys{opacity:.62;display:flex;gap:16px}
+.menubar .right{margin-left:auto;display:flex;align-items:center;gap:14px}
+.menubar .right>span{opacity:.62}
+.mb-app{
+  display:flex;align-items:center;gap:6px;padding:2px 8px;border-radius:5px;
+  font-size:12.5px;cursor:pointer;
+}
+.mb-app:hover{background:rgba(127,127,127,.18)}
+.mb-app[data-open="true"]{background:var(--accent);color:#fff}
+.mb-app .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+.mb-app[data-state="AWAITING_DECISION"]{color:var(--alert);font-weight:600}
+.mb-app[data-break="true"]{color:var(--rest)}
+.mb-app[data-state="AWAITING_DECISION"] .dot{border-radius:2px;transform:rotate(45deg);animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* popover */
+.popover{
+  position:absolute;top:32px;right:64px;width:296px;z-index:38;
+  background:var(--surface);border:1px solid var(--line);border-radius:11px;
+  box-shadow:var(--shadow);overflow:hidden;
+  transform-origin:top right;
+}
+.pop-sec{padding:12px 14px}
+.pop-sec+.pop-sec{border-top:1px solid var(--line)}
+.pop-lab{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);margin-bottom:4px}
+.pop-title{font-weight:600;font-size:13.5px;line-height:1.3}
+.pop-clock{font-size:34px;font-weight:500;letter-spacing:-.02em;text-align:center;padding:6px 0 2px}
+.pop-row{display:flex;gap:8px;margin-top:8px}
+.pop-q{display:flex;gap:8px;align-items:baseline;font-size:12.5px;padding:2.5px 0;color:var(--ink-2)}
+.pop-q .mark{width:12px;color:var(--accent);flex:none}
+.pop-q[data-cur="true"]{color:var(--ink);font-weight:600}
+.pop-q .d{margin-left:auto;font-size:11px;color:var(--ink-3)}
+.pop-menu button{display:block;width:100%;text-align:left;padding:5px 14px;font-size:13px;color:var(--ink-2)}
+.pop-menu button:hover{background:var(--accent);color:#fff}
+.pop-menu{padding:6px 0}
+
+/* windows */
+.win{
+  position:absolute;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;
+}
+.titlebar{
+  height:36px;display:flex;align-items:center;gap:8px;padding:0 12px;flex:none;
+  background:var(--surface-2);border-bottom:1px solid var(--line);
+}
+.lights{display:flex;gap:6px}
+.lights i{width:11px;height:11px;border-radius:50%;display:block}
+.lights i:nth-child(1){background:#ED6A5E}.lights i:nth-child(2){background:#F4BF50}.lights i:nth-child(3){background:#61C554}
+.titlebar h2{font-size:12.5px;font-weight:600;color:var(--ink-2);margin-left:2px}
+.win-body{padding:18px 20px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:18px}
+
+#mainwin{top:70px;left:56px;width:560px;height:548px}
+#settingswin{top:118px;left:660px;width:344px;height:396px;z-index:30}
+
+/* current task card */
+.sec-lab{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.17em;text-transform:uppercase;color:var(--ink-3)}
+.current{display:flex;flex-direction:column;gap:12px}
+.cur-head{display:flex;align-items:flex-start;gap:14px}
+.cur-title{font-size:19px;font-weight:600;letter-spacing:-.01em;line-height:1.25}
+.cur-clock{margin-left:auto;font-size:30px;font-weight:500;letter-spacing:-.02em;flex:none;color:var(--ink)}
+.cur-clock[data-paused="true"]{color:var(--ink-3)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.04em;
+  padding:2px 7px;border-radius:5px;background:var(--surface-3);color:var(--ink-2);
+}
+.chip[data-tone="accent"]{background:var(--accent-soft);color:var(--accent-ink)}
+.chip[data-tone="warn"]{background:var(--warn-soft);color:var(--warn)}
+.chip[data-tone="alert"]{background:var(--alert-soft);color:var(--alert)}
+.chip[data-tone="rest"]{background:var(--rest-soft);color:var(--rest-ink)}
+
+/* the rotation strip — the product thesis, made visible */
+.strip{display:flex;height:26px;border-radius:6px;overflow:hidden;border:1px solid var(--line);background:var(--surface-2)}
+.strip .seg-t{
+  position:relative;border-right:1px solid var(--line);min-width:8px;
+  display:flex;align-items:center;padding:0 6px;overflow:hidden;
+  font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);white-space:nowrap;
+}
+.strip .seg-t:last-child{border-right:none}
+.strip .seg-t[data-cur="true"]{color:var(--accent-ink);background:var(--accent-soft)}
+.strip .seg-t[data-brk="true"]{color:var(--rest-ink);background:var(--rest-soft)}
+.strip .seg-t[data-brk="true"] .fill{background:var(--rest)}
+.strip .fill{position:absolute;inset:0 auto 0 0;background:var(--accent);opacity:.30}
+.strip .seg-t span{position:relative}
+
+.btn{
+  padding:6px 13px;border-radius:7px;border:1px solid var(--line-2);
+  background:var(--surface);color:var(--ink);font-size:13px;font-weight:500;
+  transition:background .12s ease,border-color .12s ease;
+}
+.btn:hover{background:var(--surface-3)}
+.btn[data-variant="primary"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn[data-variant="primary"]:hover{filter:brightness(1.08)}
+.btn[data-variant="ghost"]{border-color:transparent;color:var(--ink-2)}
+.btn:disabled{opacity:.42;cursor:default}
+.btn .k{font-family:"IBM Plex Mono",monospace;font-size:10px;opacity:.55;margin-left:5px}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+
+hr.rule{border:none;border-top:1px solid var(--line);margin:0}
+
+/* queue */
+.queue{display:flex;flex-direction:column;gap:5px}
+.qrow{
+  display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:8px;
+  background:var(--surface-2);border:1px solid transparent;cursor:grab;
+}
+.qrow:hover{border-color:var(--line-2)}
+.qrow[data-drag="over"]{border-color:var(--accent);background:var(--accent-soft)}
+.qrow .grip{color:var(--ink-3);font-size:13px;letter-spacing:-1px;flex:none}
+.qrow .idx{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);width:16px;flex:none}
+.qrow .t{font-size:13.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qrow .pri{width:5px;height:5px;border-radius:50%;flex:none}
+.qrow .dur{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-2)}
+.qrow .go{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--accent-ink);
+  background:var(--accent-soft);padding:2px 7px;border-radius:5px;opacity:0;transition:opacity .12s}
+.qrow:hover .go,.qrow:focus-visible .go{opacity:1}
+.qrow:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.qrow[data-parked="true"] .dur{color:var(--warn);font-weight:500}
+.qrow[data-parked="true"]{background:var(--warn-soft)}
+.strip .seg-t[data-parked="true"]{border-bottom:2px solid var(--warn)}
+.qrow .del{color:var(--ink-3);font-size:15px;line-height:1;padding:0 2px;opacity:0}
+.qrow:hover .del{opacity:1}
+.qrow .del:hover{color:var(--alert)}
+.empty{color:var(--ink-3);font-size:13px;padding:8px 0}
+
+/* capacity */
+.cap{display:flex;gap:20px;align-items:baseline;flex-wrap:wrap}
+.cap div{display:flex;flex-direction:column;gap:1px}
+.cap .n{font-family:"IBM Plex Mono",monospace;font-size:15px;font-weight:500}
+.cap .n[data-over="true"]{color:var(--alert)}
+.cap .l{font-size:10.5px;color:var(--ink-3);letter-spacing:.04em}
+
+/* add form */
+.addform{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.addform input[type=text]{flex:1;min-width:170px}
+input,select{
+  font:inherit;font-size:13px;padding:6px 9px;border-radius:7px;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--ink);
+}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
+
+/* today */
+.today{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:12px}
+.today .n{font-family:"IBM Plex Mono",monospace;font-size:17px;font-weight:500}
+.today .l{font-size:10.5px;color:var(--ink-3)}
+.toplist{display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--ink-2)}
+.toplist div{display:flex;gap:8px}
+.toplist .v{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11.5px}
+
+/* settings */
+.setgrp{display:flex;flex-direction:column;gap:9px}
+.setrow{display:flex;align-items:center;gap:10px;font-size:13px}
+.setrow .lbl{color:var(--ink-2)}
+.setrow select,.setrow input[type=number]{margin-left:auto}
+.switch{margin-left:auto;width:38px;height:22px;border-radius:11px;background:var(--line-2);position:relative;transition:background .15s}
+.switch[aria-checked="true"]{background:var(--accent)}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.switch[aria-checked="true"]::after{transform:translateX(16px)}
+
+/* notification */
+.notif{
+  position:absolute;top:36px;right:14px;width:294px;z-index:44;
+  background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:11px 13px;
+  box-shadow:var(--shadow);animation:slidein .28s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes slidein{from{transform:translateX(22px);opacity:0}}
+.notif .h{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--alert)}
+.notif .b{font-size:12.5px;color:var(--ink-2);margin-top:3px}
+
+/* expiration checkpoint — app-scoped, sits under the OS menu bar */
+.checkpoint{
+  position:absolute;inset:26px 0 0 0;z-index:36;
+  background:
+    radial-gradient(90% 70% at 50% 0%, var(--alert-soft), transparent 70%),
+    var(--surface);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;
+  padding:34px 24px;animation:cpin .22s ease-out;
+}
+@keyframes cpin{from{opacity:0;transform:scale(.985)}}
+.cp-kicker{font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:.34em;text-transform:uppercase;color:var(--alert);font-weight:600}
+.checkpoint[data-kind="BREAK"]{background:radial-gradient(90% 70% at 50% 0%, var(--rest-soft), transparent 70%),var(--surface)}
+.checkpoint[data-kind="BREAK"] .cp-kicker{color:var(--rest)}
+.cp-opt[data-rest="true"]{background:var(--rest);border-color:var(--rest);color:#fff}
+.cp-opt[data-rest="true"] .num{color:rgba(255,255,255,.72)}
+.cp-opt:hover[data-rest="true"]{border-color:var(--rest)}
+.cp-task{font-size:30px;font-weight:600;letter-spacing:-.02em;margin-top:14px;text-align:center;max-width:22ch}
+.cp-sub{color:var(--ink-2);margin-top:8px;font-size:14px}
+.cp-q{margin-top:22px;font-size:15px;font-weight:500}
+.cp-warn{
+  margin-top:14px;font-size:12.5px;color:var(--warn);background:var(--warn-soft);
+  padding:6px 12px;border-radius:7px;display:flex;gap:7px;align-items:center;max-width:44ch;text-align:left;
+}
+.cp-opts{display:flex;flex-direction:column;gap:12px;margin-top:24px;width:min(460px,100%)}
+.cp-grid{display:grid;grid-template-columns:auto 1fr 1fr;gap:8px;align-items:center}
+.cp-hdr{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-3);text-align:center;padding-bottom:2px}
+.cp-row-lab{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;
+  padding-right:10px;white-space:nowrap}
+.cp-grid .cp-opt{justify-content:center;padding:12px 10px;font-size:13.5px;gap:0;
+  flex-direction:column;line-height:1.3}
+.cp-grid .cp-opt .num{margin-left:0;margin-top:3px}
+.cp-wide{justify-content:flex-start}
+.cp-len{display:flex;align-items:center;gap:6px;justify-content:center;padding-top:2px}
+.cp-len-lab{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-3);margin-right:4px}
+.cp-chip{font-family:"IBM Plex Mono",monospace;font-size:11.5px;padding:3px 10px;border-radius:6px;
+  border:1px solid var(--line-2);color:var(--ink-2);transition:all .12s}
+.cp-chip[aria-pressed="true"]{background:var(--rest);border-color:var(--rest);color:#fff}
+.cp-opt{
+  display:flex;align-items:center;gap:11px;width:100%;padding:13px 16px;border-radius:9px;
+  border:1px solid var(--line-2);background:var(--surface);font-size:14.5px;font-weight:500;
+  transition:transform .1s ease,border-color .12s ease;
+}
+.cp-opt:hover{transform:translateY(-1px);border-color:var(--accent)}
+.cp-opt .num{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);margin-left:auto}
+.cp-opt[data-rec="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.cp-opt[data-rec="true"] .num{color:rgba(255,255,255,.7)}
+.cp-opt .glyph{font-size:15px;width:16px;text-align:center}
+.cp-ext{display:flex;gap:8px;flex-wrap:wrap;padding:2px 2px 0}
+.cp-ext .btn{flex:1}
+.cp-ext input{width:66px}
+.cp-note{margin-top:20px;font-size:11.5px;color:var(--ink-3);font-family:"IBM Plex Mono",monospace;letter-spacing:.03em}
+
+/* legend under desktop */
+.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px 28px;margin-top:22px}
+.legend section{display:flex;flex-direction:column;gap:4px}
+.legend h3{font-size:13px;font-weight:600}
+.legend p{margin:0;font-size:12.5px;color:var(--ink-2)}
+.legend code{font-family:"IBM Plex Mono",monospace;font-size:11.5px;background:var(--surface-3);padding:1px 5px;border-radius:4px}
+
+@media (max-width:1000px){
+  .desktop{min-height:0;padding-bottom:14px}
+  #mainwin,#settingswin,.popover{position:static;width:auto;height:auto;margin:14px}
+  #mainwin{max-height:none}
+  .checkpoint{position:fixed;inset:0;z-index:60}
+  .notif{position:fixed}
+}
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <div>
+      <div class="eyebrow">Interactive prototype · macOS menu bar utility</div>
+      <h1>TimeBox</h1>
+    </div>
+    <p>A working model of the rotation timebox loop. The timer is timestamp-based, the state machine is explicit, and expiry always stops at a decision — nothing advances on its own.</p>
+  </header>
+
+  <div class="rail">
+    <span class="rail-label">Prototype controls</span>
+    <div class="seg" role="group" aria-label="Clock speed">
+      <button data-speed="1" aria-pressed="false">1×</button>
+      <button data-speed="60" aria-pressed="true">60×</button>
+      <button data-speed="600" aria-pressed="false">600×</button>
+    </div>
+    <span class="hint">At 60× a 30-minute block runs in 30 seconds.</span>
+    <div class="seg" role="group" aria-label="Theme">
+      <button data-theme-set="system" aria-pressed="true">System</button>
+      <button data-theme-set="light" aria-pressed="false">Light</button>
+      <button data-theme-set="dark" aria-pressed="false">Dark</button>
+    </div>
+    <button class="btn" id="reset">Reset day</button>
+  </div>
+
+  <div class="desktop" id="desktop">
+    <div class="menubar">
+      <strong style="font-weight:600">Finder</strong>
+      <div class="sys"><span>File</span><span>Edit</span><span>View</span><span>Go</span></div>
+      <div class="right">
+        <div class="mb-app" id="mbapp" role="button" tabindex="0" aria-haspopup="true">
+          <i class="dot"></i><span class="mono" id="mbtitle">TimeBox</span>
+        </div>
+        <span>􀙇</span><span>􀊫</span><span class="mono" id="clock">9:41</span>
+      </div>
+    </div>
+
+    <div id="stage"></div>
+  </div>
+
+  <div class="legend">
+    <section>
+      <h3>Menu bar is the primary surface</h3>
+      <p>Title shows <code>◉ 24:17</code> while running, <code>◉ PAUSED</code> when held, <code>⚠ TIME'S UP</code> at a checkpoint. Click it for the popover — a full day's use never needs the main window.</p>
+    </section>
+    <section>
+      <h3>The rotation strip</h3>
+      <p>Each queued task is a segment sized by its allocation; the current one fills as it burns. The day reads as a playlist, not a to-do list.</p>
+    </section>
+    <section>
+      <h3>Checkpoint has no exit</h3>
+      <p>Five actions, no exits. No dismiss, close, later, or continue — and no timeout that resolves it. Press <code>1</code>–<code>5</code>, or <code>Return</code> for the recommended choice. A break ends at its own checkpoint rather than dropping you back into work unannounced.</p>
+    </section>
+    <section>
+      <h3>Switching is a decision too</h3>
+      <p>Click any queued task (or <code>↑</code>/<code>↓</code> + <code>Return</code>) to jump to it mid-block. The running block is <em>set down, not thrown away</em> — it keeps its remaining time, the task rotates to the back, and returning resumes the remainder. Today counts how often you did it.</p>
+    </section>
+    <section>
+      <h3>Breaks are blocks too</h3>
+      <p>Break is a <em>modifier on the task decision</em>, not a substitute for it. Complete or Keep Pending, each with or without a break — four single-click compound actions. Pick the length first; break time never counts as worked.</p>
+    </section>
+    <section>
+      <h3>Block done ≠ task done</h3>
+      <p>Keeping a task pending completes its <em>time block</em> and rotates the task to the back of the queue. Only an explicit Complete marks the task itself finished.</p>
+    </section>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ---------------- virtual clock ---------------- */
+let speed = 60, vclock = Date.now(), lastReal = performance.now();
+function vnow(){ return vclock; }
+function advance(){
+  const t = performance.now();
+  vclock += (t - lastReal) * speed;
+  lastReal = t;
+}
+
+/* ---------------- state ---------------- */
+const uid = () => Math.random().toString(36).slice(2,10);
+let S;
+function seed(){
+  const mk = (title,mins,pri) => ({id:uid(),title,status:'TODO',priority:pri,blockSeconds:mins*60});
+  const tasks = [
+    mk('Fix attendance calculation bug',30,'HIGH'),
+    mk('Payroll calculation',45,'HIGH'),
+    mk('Code review',30,'MEDIUM'),
+    mk('Client proposal',45,'MEDIUM'),
+    mk('Documentation',30,'LOW'),
+  ];
+  S = {
+    timerState:'IDLE',
+    tasks, queue: tasks.map(t=>t.id),
+    blocks:[], currentBlockId:null,
+    popover:false, settingsOpen:false, extendOpen:false, breakMinutes:10, notif:null,
+    settings:{ launchAtLogin:false, theme:'SYSTEM', defaultMinutes:30, defaultBreakMinutes:10,
+               sound:true, notify:true, availableMinutes:420 }
+  };
+}
+seed();
+
+const task = id => S.tasks.find(t=>t.id===id);
+const curBlock = () => S.blocks.find(b=>b.id===S.currentBlockId) || null;
+const curTask = () => { const b=curBlock(); return b && b.taskId ? task(b.taskId) : null; };
+const onBreak = () => { const b=curBlock(); return !!b && b.kind==='BREAK'; };
+/* A task set down mid-block keeps that block parked, holding its remainder. */
+const parkedFor = id => S.blocks.find(b=>b.id!==S.currentBlockId && b.taskId===id && b.status==='PAUSED');
+const queuedSecondsFor = id => { const p=parkedFor(id);
+  return p ? Math.round(p.remainingWhenPaused/1000) : task(id).blockSeconds; };
+
+/* ---------------- timer arithmetic (timestamps, never decrement) --------- */
+function remainingMs(b){
+  if(!b) return 0;
+  if(b.status==='PAUSED') return b.remainingWhenPaused;
+  return Math.max(0, b.endAt - vnow());
+}
+function activeMs(b){
+  return b.accumulatedActive + (b.status==='RUNNING' ? vnow()-b.lastResumeAt : 0);
+}
+function allocMs(b){ return (b.planned + b.extension) * 1000; }
+
+/* ---------------- state machine ---------------- */
+function startNext(){
+  if(S.queue.length===0){ S.timerState='IDLE'; S.currentBlockId=null; return; }
+  startTask(S.queue[0]);
+}
+function startTask(taskId){
+  const t = task(taskId); if(!t) return;
+  S.queue = [taskId, ...S.queue.filter(id=>id!==taskId)];
+  t.status = 'IN_PROGRESS';
+  const now = vnow();
+
+  const p = parkedFor(taskId);
+  if(p){
+    S.currentBlockId = p.id; S.extendOpen=false;
+    if(p.remainingWhenPaused <= 30000){        /* nothing meaningful left — the block is over */
+      p.status='AWAITING_DECISION'; S.timerState='AWAITING_DECISION';
+    } else {
+      p.endAt = now + p.remainingWhenPaused;
+      p.lastResumeAt = now; p.status='RUNNING'; S.timerState='RUNNING';
+    }
+    return;
+  }
+
+  const b = { id:uid(), kind:'WORK', taskId, planned:t.blockSeconds, extension:0, interruptions:0,
+              startedAt:now, endAt: now + t.blockSeconds*1000,
+              accumulatedActive:0, lastResumeAt:now,
+              remainingWhenPaused:0, status:'RUNNING' };
+  S.blocks.push(b); S.currentBlockId=b.id; S.timerState='RUNNING'; S.extendOpen=false;
+}
+function startBreak(mins){
+  const now = vnow();
+  const b = { id:uid(), kind:'BREAK', taskId:null, planned:mins*60, extension:0, interruptions:0,
+              startedAt:now, endAt: now + mins*60*1000,
+              accumulatedActive:0, lastResumeAt:now,
+              remainingWhenPaused:0, status:'RUNNING' };
+  S.blocks.push(b); S.currentBlockId=b.id; S.timerState='RUNNING';
+  S.extendOpen=false;
+}
+/* Break is a modifier on the task decision, never a substitute for it (D7). */
+function decideBreak(mins, complete){
+  const b=curBlock(); if(!b||S.timerState!=='AWAITING_DECISION'||!(mins>0)) return;
+  closeBlock(b,'COMPLETED');
+  const t=task(b.taskId);
+  if(complete){
+    t.status='DONE'; t.completedAt=vnow();
+    S.queue = S.queue.filter(x=>x!==t.id);
+  } else {
+    S.queue = [...S.queue.filter(x=>x!==t.id), t.id];
+  }
+  startBreak(mins);
+}
+function extendBreak(mins){
+  const b=curBlock(); if(!b||b.kind!=='BREAK'||!(mins>0)) return;
+  b.extension += mins*60;
+  b.endAt = vnow() + mins*60*1000;
+  b.lastResumeAt = vnow(); b.status='RUNNING'; S.timerState='RUNNING'; S.extendOpen=false;
+}
+function endBreak(){
+  const b=curBlock(); if(!b||b.kind!=='BREAK') return;
+  closeBlock(b,'COMPLETED'); S.currentBlockId=null; startNext();
+}
+function switchTo(taskId){
+  const b=curBlock();
+  if(S.timerState==='AWAITING_DECISION' && !onBreak()) return;  /* decide first, no side doors */
+  if(b && b.taskId===taskId) return;
+  if(b && b.kind==='BREAK'){                        /* cut the break short, no interruption recorded */
+    closeBlock(b,'COMPLETED'); S.currentBlockId=null;
+  } else if(b){
+    b.accumulatedActive = activeMs(b);
+    b.remainingWhenPaused = remainingMs(b);        /* the allocation is NOT re-granted */
+    b.status = 'PAUSED';
+    b.interruptions = (b.interruptions||0) + 1;
+    const id=b.taskId;
+    S.queue = [...S.queue.filter(x=>x!==id), id];  /* same rotation as Keep Pending */
+    S.currentBlockId=null;
+  }
+  startTask(taskId);
+}
+function pause(){
+  const b=curBlock(); if(!b||S.timerState!=='RUNNING') return;
+  b.accumulatedActive = activeMs(b);
+  b.remainingWhenPaused = remainingMs(b);
+  b.status='PAUSED'; S.timerState='PAUSED';
+}
+function resume(){
+  const b=curBlock(); if(!b||S.timerState!=='PAUSED') return;
+  b.endAt = vnow() + b.remainingWhenPaused;
+  b.lastResumeAt = vnow(); b.status='RUNNING'; S.timerState='RUNNING';
+}
+function closeBlock(b,status){
+  b.actual = Math.round(activeMs(b)/1000);
+  b.endedAt = vnow(); b.status = status;
+}
+function expire(){
+  const b=curBlock(); if(!b) return;
+  b.accumulatedActive = activeMs(b);
+  b.status='AWAITING_DECISION'; S.timerState='AWAITING_DECISION'; dirty=true;
+  S.extendOpen=false; S.breakMinutes=S.settings.defaultBreakMinutes; S.popover=false;
+  if(S.settings.notify){
+    S.notif = b.kind==='BREAK'
+      ? { kind:'BREAK', mins:Math.round(allocMs(b)/60000) }
+      : { kind:'WORK', title:curTask().title, mins:Math.round(allocMs(b)/60000) };
+    setTimeout(()=>{ S.notif=null; dirty=true; }, 6500/Math.max(1,speed/60));
+  }
+}
+function skip(){
+  const b=curBlock(); if(!b) return;
+  closeBlock(b,'SKIPPED');
+  const id=b.taskId;
+  S.queue = [...S.queue.filter(x=>x!==id), id];
+  S.currentBlockId=null; startNext();
+}
+function completeCurrent(){
+  const b=curBlock(); if(!b) return;
+  closeBlock(b,'COMPLETED');
+  const t=task(b.taskId); t.status='DONE'; t.completedAt=vnow();
+  S.queue = S.queue.filter(x=>x!==t.id);
+  S.currentBlockId=null; startNext();
+}
+function decidePending(){
+  const b=curBlock(); if(!b) return;
+  closeBlock(b,'COMPLETED');
+  const id=b.taskId;
+  S.queue = [...S.queue.filter(x=>x!==id), id];
+  S.currentBlockId=null; startNext();
+}
+function decideExtend(mins){
+  const b=curBlock(); if(!b||S.timerState!=='AWAITING_DECISION') return;
+  if(!(mins>0)) return;
+  b.extension += mins*60;
+  b.endAt = vnow() + mins*60*1000;
+  b.lastResumeAt = vnow();
+  b.status='RUNNING'; S.timerState='RUNNING'; S.extendOpen=false;
+}
+function extendedTodayFor(taskId){
+  return S.blocks.filter(b=>b.taskId===taskId).reduce((n,b)=>n+b.extension,0);
+}
+
+/* ---------------- formatting ---------------- */
+function clockStr(ms){
+  const s = Math.max(0,Math.ceil(ms/1000));
+  const h=Math.floor(s/3600), m=Math.floor(s%3600/60), sec=s%60;
+  const p=n=>String(n).padStart(2,'0');
+  return h ? `${h}:${p(m)}:${p(sec)}` : `${p(m)}:${p(sec)}`;
+}
+const durStr = s => { const h=Math.floor(s/3600), m=Math.round(s%3600/60);
+  return h ? (m? `${h}h ${m}m` : `${h}h`) : `${m}m`; };
+const esc = s => s.replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const PRI = {HIGH:'var(--alert)',MEDIUM:'var(--warn)',LOW:'var(--ink-3)'};
+
+/* ---------------- render ---------------- */
+const stage = document.getElementById('stage');
+const mbapp = document.getElementById('mbapp');
+const mbtitle = document.getElementById('mbtitle');
+
+function menuBarTitle(){
+  const b=curBlock();
+  if(S.timerState==='AWAITING_DECISION') return "TIME'S UP";
+  if(S.timerState==='PAUSED') return 'PAUSED';
+  if(S.timerState==='RUNNING') return (b.kind==='BREAK'?'BREAK  ':'') + clockStr(remainingMs(b));
+  return 'TimeBox';
+}
+
+function render(){
+  const b=curBlock(), t=curTask();
+  mbtitle.textContent = menuBarTitle();
+  mbapp.dataset.state = S.timerState;
+  mbapp.dataset.break = String(onBreak() && S.timerState!=='AWAITING_DECISION');
+  mbapp.dataset.open = String(S.popover);
+
+  let html = '';
+  html += mainWindow(b,t);
+  if(S.settingsOpen) html += settingsWindow();
+  if(S.popover && S.timerState!=='AWAITING_DECISION') html += popover(b,t);
+  if(S.timerState==='AWAITING_DECISION') html += checkpoint(b,t);
+  if(S.notif) html += notification();
+  stage.innerHTML = html;
+}
+
+/* ---- rotation strip ---- */
+function strip(){
+  const ids = S.queue.slice(0,7);
+  const b=curBlock();
+  const brk = onBreak();
+  if(!ids.length && !brk) return '';
+  const total = (ids.reduce((n,id)=>n+queuedSecondsFor(id),0) + (brk? b.planned+b.extension : 0)) || 1;
+  const brkSeg = brk ? `<div class="seg-t" data-brk="true" style="width:${((b.planned+b.extension)/total*100).toFixed(2)}%">
+      <div class="fill js-fill" style="width:${Math.min(100,(1-remainingMs(b)/allocMs(b))*100).toFixed(1)}%"></div>
+      <span>◔ ${Math.round((b.planned+b.extension)/60)}m</span></div>` : '';
+  return `<div class="strip">${brkSeg}${ids.map(id=>{
+    const tk=task(id), isCur = b && b.taskId===id && S.timerState!=='IDLE';
+    const w = (queuedSecondsFor(id)/total*100).toFixed(2);
+    const prog = isCur ? Math.min(100, (1 - remainingMs(b)/allocMs(b))*100) : 0;
+    return `<div class="seg-t" data-cur="${isCur}" data-parked="${!!parkedFor(id)}" style="width:${w}%">
+      ${isCur?`<div class="fill js-fill" style="width:${prog.toFixed(1)}%"></div>`:''}
+      <span>${esc(tk.title.split(' ')[0])} · ${Math.round(tk.blockSeconds/60)}m</span></div>`;
+  }).join('')}</div>`;
+}
+
+/* ---- main window ---- */
+function mainWindow(b,t){
+  const brk = onBreak();
+  const doneTasks = S.tasks.filter(x=>x.status==='DONE');
+  const pending = S.tasks.filter(x=>x.status!=='DONE'&&x.status!=='CANCELLED');
+  const secOf = x => x.actual!=null ? x.actual : Math.round(activeMs(x)/1000);
+  const workedSec = S.blocks.filter(x=>x.kind!=='BREAK').reduce((n,x)=>n+secOf(x),0);
+  const breakSec  = S.blocks.filter(x=>x.kind==='BREAK').reduce((n,x)=>n+secOf(x),0);
+  const switched  = S.blocks.reduce((n,x)=>n+(x.interruptions||0),0);
+  const allocSec = S.queue.reduce((n,id)=>n+queuedSecondsFor(id),0);
+  const availSec = S.settings.availableMinutes*60;
+  const over = allocSec > availSec;
+
+  const byTask = {};
+  S.blocks.filter(x=>x.kind!=='BREAK').forEach(x=>{ byTask[x.taskId]=(byTask[x.taskId]||0)+secOf(x); });
+  const top = Object.entries(byTask).sort((a,c)=>c[1]-a[1]).slice(0,3);
+
+  const upNext = S.queue.filter(id => !(b && b.taskId===id && S.timerState!=='IDLE'));
+  const nextUp = S.queue[0];
+
+  return `<div class="win" id="mainwin">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><h2>TimeBox</h2></div>
+    <div class="win-body">
+
+      <div class="current">
+        <div class="sec-lab">${brk?'On a break':'Current task'}</div>
+        ${ brk ? `
+          <div class="cur-head">
+            <div>
+              <div class="cur-title" style="color:var(--rest-ink)">Break</div>
+              <div class="chips" style="margin-top:7px">
+                <span class="chip" data-tone="rest">${durStr(b.planned)} break</span>
+                ${b.extension?`<span class="chip" data-tone="warn">Extended +${durStr(b.extension)}</span>`:''}
+                ${nextUp?`<span class="chip">Next up · ${esc(task(nextUp).title)}</span>`:''}
+              </div>
+            </div>
+            <div class="cur-clock mono js-clock" style="color:var(--rest)">${clockStr(remainingMs(b))}</div>
+          </div>
+          <div class="btnrow">
+            <button class="btn" data-act="brk-ext" data-min="5">+5 min</button>
+            <button class="btn" data-variant="primary" data-act="brk-start">End break${nextUp?` &amp; start ${esc(task(nextUp).title.split(' ')[0])}`:''}</button>
+          </div>`
+        : t ? `
+          <div class="cur-head">
+            <div>
+              <div class="cur-title">${esc(t.title)}</div>
+              <div class="chips" style="margin-top:7px">
+                <span class="chip" data-tone="accent">Block ${S.blocks.filter(x=>x.taskId===t.id).length} · ${durStr(b.planned)}</span>
+                ${b.extension?`<span class="chip" data-tone="warn">Extended +${durStr(b.extension)}</span>`:''}
+                ${b.interruptions?`<span class="chip" data-tone="warn">Set down ${b.interruptions}× · resuming its remainder</span>`:''}
+                ${S.timerState==='PAUSED'?`<span class="chip">Paused — allocation held</span>`:''}
+              </div>
+            </div>
+            <div class="cur-clock mono js-clock" data-paused="${S.timerState==='PAUSED'}">${clockStr(remainingMs(b))}</div>
+          </div>
+          <div class="btnrow">
+            <button class="btn" data-act="${S.timerState==='PAUSED'?'resume':'pause'}">${S.timerState==='PAUSED'?'Resume':'Pause'}<span class="k">Space</span></button>
+            <button class="btn" data-act="skip">Skip block<span class="k">S</span></button>
+            <button class="btn" data-variant="primary" data-act="complete">Complete task<span class="k">D</span></button>
+          </div>`
+        : `<div class="empty">${S.queue.length? 'Nothing running. Start the top of the queue whenever you are ready.' : 'Queue is empty. Add a task to plan the day.'}</div>
+           ${S.queue.length?`<div class="btnrow"><button class="btn" data-variant="primary" data-act="startnext">Start ${esc(task(S.queue[0]).title)}</button></div>`:''}` }
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <div class="sec-lab">Rotation</div>
+        ${strip() || '<div class="empty">No allocations queued.</div>'}
+      </div>
+
+      <hr class="rule">
+
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="sec-lab">Up next — drag to reorder</div>
+        <div class="queue" id="queue">
+          ${ upNext.length ? upNext.map((id,i)=>{
+            const tk=task(id), pk=parkedFor(id);
+            return `<div class="qrow" draggable="true" data-id="${id}" data-act="switch" tabindex="0" data-parked="${!!pk}"
+                 title="${pk?'Resume this block — '+clockStr(pk.remainingWhenPaused)+' of its allocation is left':'Start this task now — the running block is set down, keeping its remaining time'}">
+              <span class="grip">⠿</span>
+              <span class="idx mono">${i+1}</span>
+              <span class="pri" style="background:${PRI[tk.priority]}"></span>
+              <span class="t">${esc(tk.title)}</span>
+              <span class="dur">${pk?clockStr(pk.remainingWhenPaused)+' left':durStr(tk.blockSeconds)}</span>
+              <span class="go">${pk?'Resume ▶':'Start ▶'}</span>
+              <button class="del" data-act="del" data-id="${id}" title="Remove">×</button>
+            </div>`;
+          }).join('') : '<div class="empty">Nothing queued behind the current task.</div>' }
+        </div>
+      </div>
+
+      <form class="addform" id="addform">
+        <input type="text" id="newtitle" placeholder="Add a task…  (N)" aria-label="Task title">
+        <select id="newdur" aria-label="Block duration">
+          <option value="15">15 min</option><option value="25">25 min</option>
+          <option value="30" selected>30 min</option><option value="45">45 min</option>
+          <option value="60">60 min</option>
+        </select>
+        <select id="newpri" aria-label="Priority">
+          <option value="HIGH">High</option><option value="MEDIUM" selected>Medium</option><option value="LOW">Low</option>
+        </select>
+        <button class="btn" type="submit">Add</button>
+      </form>
+
+      <hr class="rule">
+
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <div class="sec-lab">Capacity</div>
+        <div class="cap">
+          <div><span class="n mono">${durStr(availSec)}</span><span class="l">Available today</span></div>
+          <div><span class="n mono">${durStr(allocSec)}</span><span class="l">Allocated</span></div>
+          <div><span class="n mono" data-over="${over}">${over?'+':''}${durStr(Math.abs(availSec-allocSec))}</span>
+               <span class="l">${over?'Over capacity':'Unallocated'}</span></div>
+        </div>
+      </div>
+
+      <hr class="rule">
+
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <div class="sec-lab">Today</div>
+        <div class="today">
+          <div><div class="n mono js-worked">${durStr(workedSec)}</div><div class="l">Worked</div></div>
+          <div><div class="n mono">${doneTasks.length}</div><div class="l">Tasks completed</div></div>
+          <div><div class="n mono">${pending.length}</div><div class="l">Tasks pending</div></div>
+          <div><div class="n mono">${S.blocks.filter(x=>x.kind!=='BREAK'&&x.status==='COMPLETED').length}</div><div class="l">Blocks completed</div></div>
+          <div><div class="n mono" style="color:var(--rest-ink)">${durStr(breakSec)}</div><div class="l">On break</div></div>
+          <div><div class="n mono"${switched>2?' style="color:var(--warn)"':''}>${switched}×${switched>2?' ⚠':''}</div><div class="l">Switched early</div></div>
+        </div>
+        ${ top.length ? `<div class="toplist">${top.map(([id,s],i)=>
+            `<div><span class="mono" style="color:var(--ink-3)">${i+1}</span><span>${esc(task(id).title)}</span><span class="v">${durStr(s)}</span></div>`
+          ).join('')}</div>` : '' }
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---- popover ---- */
+function popover(b,t){
+  const next = S.queue.find(id => !(b && b.taskId===id));
+  return `<div class="popover">
+    <div class="pop-sec">
+      <div class="pop-lab">${onBreak()?'On a break':'Current'}</div>
+      <div class="pop-title"${onBreak()?' style="color:var(--rest-ink)"':''}>${onBreak()?'Break':(t?esc(t.title):'Nothing running')}</div>
+      <div class="pop-clock mono js-clock"${onBreak()?' style="color:var(--rest)"':''}>${b&&S.timerState!=='IDLE'?clockStr(remainingMs(b)):'--:--'}</div>
+      ${next?`<div class="pop-lab" style="margin-top:8px">Next</div><div style="font-size:13px;color:var(--ink-2)">${esc(task(next).title)}</div>`:''}
+      <div class="pop-row">
+        ${onBreak()?`<button class="btn" style="flex:1" data-act="brk-ext" data-min="5">+5 min</button>
+             <button class="btn" data-variant="primary" style="flex:1" data-act="brk-start">End break</button>`
+        :t?`<button class="btn" style="flex:1" data-act="${S.timerState==='PAUSED'?'resume':'pause'}">${S.timerState==='PAUSED'?'Resume':'Pause'}</button>
+             <button class="btn" style="flex:1" data-act="skip">Skip</button>`
+           :`<button class="btn" data-variant="primary" style="flex:1" data-act="startnext" ${S.queue.length?'':'disabled'}>Start next</button>`}
+      </div>
+    </div>
+    <div class="pop-sec">
+      <div class="pop-lab">Today's tasks</div>
+      ${S.queue.slice(0,5).map(id=>{
+        const cur = b && b.taskId===id && S.timerState!=='IDLE';
+        return `<div class="pop-q" data-cur="${cur}"><span class="mark">${cur?'→':''}</span>
+          <span>${esc(task(id).title)}</span><span class="d mono">${parkedFor(id)?clockStr(parkedFor(id).remainingWhenPaused)+' left':durStr(task(id).blockSeconds)}</span></div>`;
+      }).join('') || '<div class="empty">Queue empty</div>'}
+    </div>
+    <div class="pop-sec pop-menu" style="padding:6px 0">
+      <button data-act="openapp">Open App</button>
+      <button data-act="settings">Settings…</button>
+      <button data-act="quit">Quit TimeBox</button>
+    </div>
+  </div>`;
+}
+
+/* ---- expiration checkpoint ---- */
+function checkpoint(b,t){
+  return b.kind==='BREAK' ? breakCheckpoint(b) : workCheckpoint(b,t);
+}
+
+function workCheckpoint(b,t){
+  const extended = extendedTodayFor(t.id);
+  const bm = S.breakMinutes;
+  return `<div class="checkpoint" data-kind="WORK" role="dialog" aria-modal="true" aria-label="Time block expired">
+    <div class="cp-kicker">Time's up</div>
+    <div class="cp-task">${esc(t.title)}</div>
+    <div class="cp-sub">Your ${Math.round(allocMs(b)/60000)}-minute block is over.</div>
+    <div class="cp-q">What do you want to do with this task?</div>
+    ${ extended ? `<div class="cp-warn"><span>⚠</span><span>Original allocation ${durStr(b.planned)} · extended +${durStr(extended)} today. You are choosing to spend more of the day here.</span></div>` : '' }
+
+    <div class="cp-opts">
+      ${ S.extendOpen ? `
+        <div class="cp-ext">
+          <button class="btn" data-act="ext" data-min="5">+5 min</button>
+          <button class="btn" data-act="ext" data-min="10">+10 min</button>
+          <button class="btn" data-act="ext" data-min="15">+15 min</button>
+          <input type="number" id="custmin" min="1" max="180" placeholder="min" aria-label="Custom minutes">
+          <button class="btn" data-act="ext-custom">Add</button>
+        </div>` : '' }
+
+      <div class="cp-grid">
+        <div class="cp-hdr"></div>
+        <div class="cp-hdr">then start next</div>
+        <div class="cp-hdr">then take a break</div>
+
+        <div class="cp-row-lab"><span class="glyph">✓</span>Complete</div>
+        <button class="cp-opt" data-act="cp-complete">Start Next<span class="num">1</span></button>
+        <button class="cp-opt" data-act="cp-cbreak">Break ${bm}m<span class="num">2</span></button>
+
+        <div class="cp-row-lab"><span class="glyph">→</span>Keep pending</div>
+        <button class="cp-opt" data-rec="true" data-act="cp-pending">Start Next<span class="num">3 · ⏎</span></button>
+        <button class="cp-opt" data-rest="true" data-act="cp-pbreak">Break ${bm}m<span class="num">4</span></button>
+      </div>
+
+      <div class="cp-len">
+        <span class="cp-len-lab">Break length</span>
+        ${[5,10,15,30].map(m=>`<button class="cp-chip" data-act="brk-len" data-min="${m}" aria-pressed="${m===bm}">${m}m</button>`).join('')}
+      </div>
+
+      ${ S.extendOpen ? '' : `<button class="cp-opt cp-wide" data-act="cp-extend"><span class="glyph">+</span>Extend Time — keep working on this<span class="num">5</span></button>` }
+    </div>
+
+    <div class="cp-note">No dismiss · no close · no timeout — the decision is the product</div>
+  </div>`;
+}
+
+function breakCheckpoint(b){
+  const nextId = S.queue[0];
+  const total = Math.round(allocMs(b)/60000);
+  return `<div class="checkpoint" data-kind="BREAK" role="dialog" aria-modal="true" aria-label="Break ended">
+    <div class="cp-kicker">Break's over</div>
+    <div class="cp-task">${nextId ? esc(task(nextId).title) : 'Nothing queued'}</div>
+    <div class="cp-sub">${total}-minute break${b.extension?` (extended +${durStr(b.extension)})`:''} finished.</div>
+    <div class="cp-q">${nextId ? 'Ready to pick the queue back up?' : 'The queue is empty.'}</div>
+
+    <div class="cp-opts">
+      ${ nextId
+        ? `<button class="cp-opt" data-rest="true" data-act="brk-start"><span class="glyph">▶</span>Start ${esc(task(nextId).title)}<span class="num">1 · ⏎</span></button>`
+        : `<button class="cp-opt" data-rest="true" data-act="brk-start"><span class="glyph">▶</span>Finish for now<span class="num">1 · ⏎</span></button>` }
+      ${ S.extendOpen ? `
+        <div class="cp-ext">
+          ${[5,10,15].map(m=>`<button class="btn" data-act="brk-ext" data-min="${m}">+${m} min</button>`).join('')}
+        </div>`
+      : `<button class="cp-opt" data-act="cp-extend"><span class="glyph">+</span>Extend Break<span class="num">2</span></button>` }
+    </div>
+
+    <div class="cp-note">Break time is tracked separately — it never counts as worked</div>
+  </div>`;
+}
+
+function notification(){
+  const n=S.notif;
+  if(n.kind==='BREAK') return `<div class="notif" role="status">
+    <div class="h" style="color:var(--rest)"><span>◔</span><span>BREAK'S OVER · TimeBox</span></div>
+    <div class="b">Your ${n.mins}-minute break has ended. Pick up the queue when you're ready.</div>
+  </div>`;
+  return `<div class="notif" role="status">
+    <div class="h"><span>⚠</span><span>TIME'S UP · TimeBox</span></div>
+    <div class="b"><strong style="color:var(--ink)">${esc(n.title)}</strong><br>Your ${n.mins}-minute time block has ended. Choose what to do next.</div>
+  </div>`;
+}
+
+/* ---- settings ---- */
+function settingsWindow(){
+  const s=S.settings;
+  const sw=(k,label)=>`<div class="setrow"><span class="lbl">${label}</span>
+    <button class="switch" role="switch" aria-checked="${s[k]}" data-act="toggle" data-key="${k}" aria-label="${label}"></button></div>`;
+  return `<div class="win" id="settingswin">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><h2>Settings</h2>
+      <button class="btn" data-variant="ghost" data-act="settings-close" style="margin-left:auto;padding:2px 8px">Done</button></div>
+    <div class="win-body" style="gap:20px">
+      <div class="setgrp">
+        <div class="sec-lab">General</div>
+        ${sw('launchAtLogin','Launch at login')}
+        <div class="setrow"><span class="lbl">Theme</span>
+          <select data-act="theme">
+            <option value="SYSTEM" ${s.theme==='SYSTEM'?'selected':''}>System</option>
+            <option value="LIGHT" ${s.theme==='LIGHT'?'selected':''}>Light</option>
+            <option value="DARK" ${s.theme==='DARK'?'selected':''}>Dark</option>
+          </select></div>
+      </div>
+      <div class="setgrp">
+        <div class="sec-lab">Timer</div>
+        <div class="setrow"><span class="lbl">Default block duration</span>
+          <select data-act="defdur">
+            ${[15,25,30,45,60].map(m=>`<option value="${m}" ${s.defaultMinutes===m?'selected':''}>${m} min</option>`).join('')}
+          </select></div>
+        <div class="setrow"><span class="lbl">Default break duration</span>
+          <select data-act="defbrk">
+            ${[5,10,15,30].map(m=>`<option value="${m}" ${s.defaultBreakMinutes===m?'selected':''}>${m} min</option>`).join('')}
+          </select></div>
+        <div class="setrow"><span class="lbl">Available working time / day</span>
+          <input type="number" min="1" max="16" step="0.5" value="${s.availableMinutes/60}" data-act="avail" style="width:76px">
+        </div>
+        ${sw('sound','Expiration sound')}
+        ${sw('notify','macOS notification')}
+      </div>
+      <div style="font-size:12px;color:var(--ink-3);border-top:1px solid var(--line);padding-top:12px">
+        Nothing here changes whether a checkpoint appears. Expiry always requires a decision.
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------------- events ---------------- */
+const ACTIONS = {
+  pause, resume, skip, startnext:startNext,
+  complete:completeCurrent,
+  'cp-complete':completeCurrent,
+  'cp-pending':decidePending,
+  'cp-extend':()=>{S.extendOpen=true},
+  'cp-cbreak':()=>decideBreak(S.breakMinutes, true),
+  'cp-pbreak':()=>decideBreak(S.breakMinutes, false),
+  'brk-start':endBreak,
+  openapp:()=>{S.popover=false},
+  settings:()=>{S.settingsOpen=true;S.popover=false},
+  'settings-close':()=>{S.settingsOpen=false},
+  quit:()=>{S.popover=false},
+};
+
+document.addEventListener('click', e=>{
+  const el = e.target.closest('[data-act]');
+  if(!el){
+    if(S.popover && !e.target.closest('.popover') && !e.target.closest('#mbapp')){ S.popover=false; render(); }
+    return;
+  }
+  const a = el.dataset.act;
+  if(a==='ext'){ decideExtend(+el.dataset.min); }
+  else if(a==='brk-len'){ S.breakMinutes = +el.dataset.min; }
+  else if(a==='brk-ext'){ extendBreak(+el.dataset.min); }
+  else if(a==='ext-custom'){ decideExtend(+document.getElementById('custmin').value); }
+  else if(a==='del'){ e.stopPropagation(); const id=el.dataset.id;
+    const p=parkedFor(id); if(p) closeBlock(p,'CANCELLED');
+    S.queue=S.queue.filter(x=>x!==id); }
+  else if(a==='switch'){ switchTo(el.dataset.id); }
+  else if(a==='toggle'){ S.settings[el.dataset.key] = !S.settings[el.dataset.key]; }
+  else if(ACTIONS[a]) ACTIONS[a]();
+  render();
+});
+
+document.addEventListener('change', e=>{
+  const el=e.target.closest('[data-act]'); if(!el) return;
+  if(el.dataset.act==='theme'){ S.settings.theme=el.value; applyTheme(); }
+  if(el.dataset.act==='defdur'){ S.settings.defaultMinutes=+el.value; }
+  if(el.dataset.act==='defbrk'){ S.settings.defaultBreakMinutes=+el.value; S.breakMinutes=+el.value; }
+  if(el.dataset.act==='avail'){ S.settings.availableMinutes=Math.round(+el.value*60); }
+  render();
+});
+
+mbapp.addEventListener('click', ()=>{
+  if(S.timerState==='AWAITING_DECISION') return;
+  S.popover=!S.popover; render();
+});
+mbapp.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); mbapp.click(); }});
+
+document.addEventListener('submit', e=>{
+  if(e.target.id!=='addform') return;
+  e.preventDefault();
+  const title=document.getElementById('newtitle').value.trim();
+  if(!title) return;
+  const t={ id:uid(), title, status:'TODO',
+            priority:document.getElementById('newpri').value,
+            blockSeconds:+document.getElementById('newdur').value*60 };
+  S.tasks.push(t); S.queue.push(t.id); render();
+});
+
+/* drag to reorder */
+let dragId=null;
+document.addEventListener('dragstart', e=>{
+  const row=e.target.closest('.qrow'); if(!row) return;
+  dragId=row.dataset.id; e.dataTransfer.effectAllowed='move';
+});
+document.addEventListener('dragover', e=>{
+  const row=e.target.closest('.qrow'); if(!row||!dragId) return;
+  e.preventDefault(); row.dataset.drag='over';
+});
+document.addEventListener('dragleave', e=>{
+  const row=e.target.closest('.qrow'); if(row) delete row.dataset.drag;
+});
+document.addEventListener('drop', e=>{
+  const row=e.target.closest('.qrow'); if(!row||!dragId) return;
+  e.preventDefault();
+  const target=row.dataset.id;
+  if(target!==dragId){
+    const q=S.queue.filter(x=>x!==dragId);
+    q.splice(q.indexOf(target),0,dragId);
+    S.queue=q;
+  }
+  dragId=null; render();
+});
+
+/* keyboard */
+document.addEventListener('keydown', e=>{
+  if(/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+  if(S.timerState==='AWAITING_DECISION'){
+    if(onBreak()){
+      if(e.key==='1'||e.key==='Enter'){ endBreak(); render(); }
+      if(e.key==='2'){ S.extendOpen=true; render(); }
+      return;
+    }
+    if(e.key==='1'){ completeCurrent(); render(); }
+    if(e.key==='2'){ decideBreak(S.breakMinutes, true); render(); }
+    if(e.key==='3'||e.key==='Enter'){ decidePending(); render(); }
+    if(e.key==='4'){ decideBreak(S.breakMinutes, false); render(); }
+    if(e.key==='5'){ S.extendOpen=true; render(); }
+    return; /* Escape and everything else: no-op, by design */
+  }
+  if(e.key===' '){ e.preventDefault(); S.timerState==='PAUSED'?resume():pause(); render(); }
+  if(e.key==='s'||e.key==='S'){ skip(); render(); }
+  if(e.key==='d'||e.key==='D'){ completeCurrent(); render(); }
+  if(e.key==='n'||e.key==='N'){ const i=document.getElementById('newtitle'); if(i){ e.preventDefault(); i.focus(); } }
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    const rows=[...document.querySelectorAll('.qrow')]; if(!rows.length) return;
+    e.preventDefault();
+    const at=rows.indexOf(document.activeElement);
+    rows[Math.max(0, Math.min(rows.length-1, at + (e.key==='ArrowDown'?1:-1)))].focus();
+  }
+  if(e.key==='Enter'){
+    const row=document.activeElement && document.activeElement.closest('.qrow');
+    if(row){ e.preventDefault(); switchTo(row.dataset.id); render(); }
+  }
+});
+
+/* prototype rail */
+document.querySelectorAll('[data-speed]').forEach(btn=>btn.addEventListener('click',()=>{
+  advance(); speed=+btn.dataset.speed;
+  document.querySelectorAll('[data-speed]').forEach(b=>b.setAttribute('aria-pressed', String(b===btn)));
+}));
+document.querySelectorAll('[data-theme-set]').forEach(btn=>btn.addEventListener('click',()=>{
+  const v=btn.dataset.themeSet;
+  S.settings.theme = v==='system'?'SYSTEM':v==='light'?'LIGHT':'DARK';
+  document.querySelectorAll('[data-theme-set]').forEach(b=>b.setAttribute('aria-pressed', String(b===btn)));
+  applyTheme(); render();
+}));
+function applyTheme(){
+  const t=S.settings.theme;
+  if(t==='SYSTEM') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t.toLowerCase());
+  document.querySelectorAll('[data-theme-set]').forEach(b=>{
+    const want = t==='SYSTEM'?'system':t.toLowerCase();
+    b.setAttribute('aria-pressed', String(b.dataset.themeSet===want));
+  });
+}
+document.getElementById('reset').addEventListener('click',()=>{ seed(); applyTheme(); render(); });
+
+/* ---------------- tick loop ---------------- */
+/* render() rebuilds the DOM and is called ONLY on state change. Rebuilding every
+   frame would destroy rows between mousedown and mouseup, swallowing every click. */
+let dirty=false;
+const wall = document.getElementById('clock');
+
+function paint(){
+  mbtitle.textContent = menuBarTitle();
+  const b=curBlock();
+  if(b && S.timerState!=='IDLE'){
+    const txt = clockStr(remainingMs(b));
+    document.querySelectorAll('.js-clock').forEach(n=>{ if(n.textContent!==txt) n.textContent=txt; });
+    if(S.timerState!=='AWAITING_DECISION'){
+      const f=document.querySelector('.js-fill');
+      if(f) f.style.width = Math.min(100,(1-remainingMs(b)/allocMs(b))*100).toFixed(1)+'%';
+    }
+    const w=document.querySelector('.js-worked');
+    if(w){
+      const secOf = x => x.actual!=null ? x.actual : Math.round(activeMs(x)/1000);
+      const t = durStr(S.blocks.filter(x=>x.kind!=='BREAK').reduce((n,x)=>n+secOf(x),0));
+      if(w.textContent!==t) w.textContent=t;
+    }
+  }
+  const d=new Date(vnow());
+  wall.textContent = `${((d.getHours()+11)%12)+1}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function loop(){
+  advance();
+  if(S.timerState==='RUNNING' && vnow() >= curBlock().endAt) expire();
+  if(dirty){ dirty=false; render(); }
+  paint();
+  requestAnimationFrame(loop);
+}
+render();
+requestAnimationFrame(loop);
+
+/* start the day so the prototype is live on load */
+startTask(S.queue[0]);
+render();
+</script>

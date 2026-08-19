@@ -1,0 +1,37 @@
+[package]
+name = "timebox"
+version = "0.1.0"
+description = "Task rotation timeboxing for macOS"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "timebox_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-notification = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+
+# SQLite lives in Rust only. There is deliberately no SQL plugin: the webview
+# must not be able to reach the database (SPEC R5/R6).
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+parking_lot = "0.12"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

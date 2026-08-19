@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities for the main window. Deliberately narrow: no filesystem, no shell, no SQL.",
+  "windows": ["main", "checkpoint"],
+  "permissions": [
+    "core:default",
+    "notification:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister"
+  ]
+}

@@ -1,0 +1,89 @@
+import { create } from "zustand";
+import { listen } from "@tauri-apps/api/event";
+import { dispatch as ipcDispatch, getSnapshot } from "../ipc/commands";
+import type { Action, Snapshot, Task, TimeBlock } from "../ipc/types";
+
+interface Store {
+  snap: Snapshot | null;
+  error: string | null;
+  /** backendNow - clientNow, so the UI can interpolate against the backend's
+   *  clock instead of the webview's. */
+  clockSkew: number;
+  refresh: () => Promise<void>;
+  send: (action: Action) => Promise<void>;
+  init: () => Promise<() => void>;
+}
+
+export const useTimebox = create<Store>((set, get) => ({
+  snap: null,
+  error: null,
+  clockSkew: 0,
+
+  refresh: async () => {
+    try {
+      const snap = await getSnapshot();
+      set({ snap, clockSkew: snap.now - Date.now(), error: null });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  send: async (action) => {
+    try {
+      const snap = await ipcDispatch(action);
+      set({ snap, clockSkew: snap.now - Date.now(), error: null });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  init: async () => {
+    await get().refresh();
+    // The backend nudges once a second while a block runs; between nudges the
+    // countdown is interpolated locally.
+    const un = await listen("timebox://changed", () => void get().refresh());
+    return un;
+  },
+}));
+
+// ------------------------------------------------------------- selectors
+// Derived views only. Nothing here decides anything.
+
+export function currentBlock(s: Snapshot | null): TimeBlock | null {
+  if (!s?.state.currentBlockId) return null;
+  return s.state.blocks.find((b) => b.id === s.state.currentBlockId) ?? null;
+}
+
+export function currentTask(s: Snapshot | null): Task | null {
+  const b = currentBlock(s);
+  if (!b?.taskId) return null;
+  return s!.state.tasks.find((t) => t.id === b.taskId) ?? null;
+}
+
+export function taskById(s: Snapshot | null, id: string): Task | undefined {
+  return s?.state.tasks.find((t) => t.id === id);
+}
+
+/** The block holding a task's remainder after a switch (SPEC D10). */
+export function parkedFor(s: Snapshot | null, taskId: string): TimeBlock | null {
+  if (!s) return null;
+  return (
+    s.state.blocks.find(
+      (b) =>
+        b.taskId === taskId &&
+        b.status === "Paused" &&
+        b.id !== s.state.currentBlockId,
+    ) ?? null
+  );
+}
+
+/** What a queued task will actually get: its remainder if parked, else a full block. */
+export function queuedMs(s: Snapshot | null, taskId: string): number {
+  const parked = parkedFor(s, taskId);
+  if (parked?.remainingWhenPausedMs != null) return parked.remainingWhenPausedMs;
+  return taskById(s, taskId)?.blockDurationMs ?? 0;
+}
+
+export function isBreak(s: Snapshot | null): boolean {
+  return currentBlock(s)?.kind === "Break";
+}
