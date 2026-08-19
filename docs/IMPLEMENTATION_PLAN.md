@@ -1,9 +1,33 @@
 # TimeBox — Implementation Plan
 
 **Companion to:** [SPEC.md](SPEC.md) · **Prototype:** [mockup.html](mockup.html)
-**Status:** Phases 1–5 complete · Phase 6 next · **Last updated:** 2026-08-19
+**Status:** Phases 1–6 complete (test 21 awaiting a manual pass) · Phase 7 next · **Last updated:** 2026-08-19
 
 Update the status marks in this file as work lands. Everything here is derived from SPEC.md — if the two disagree, SPEC.md wins and this file should be corrected.
+
+---
+
+## Changelog
+
+All entries below are from a single working session on 2026-08-19. Hours before 21:55 are **reconstructed and approximate** — per-change timestamps were not recorded at the time. Entries from 21:55 onward are exact.
+
+| Date (WIB)       | Change                                                                                                                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-19 23:50 | Main window restyled against `docs/mockup.html` (Phase 4 UI, no scope change): rotation strip ported exactly (26px, `Title · 30m` labels, parked segments underlined in warn), form controls now use a `.field` component class with native select chrome replaced by the prototype's flat control, the window body paints `--surface` like `.win`, the duplicated in-body `TimeBox` header removed (the native title bar already names it), and chip/button/queue-row metrics matched to the prototype's px values. |
+| 2026-08-19 23:30 | 6.4 popover restyled against `docs/mockup.html` rather than SPEC §7.2's bullet list — bordered card, section dividers, centred clock, `Next` block, prototype queue rows, menu-style footer. The window is now transparent (`macos-private-api`) so the card's rounded corners read, and it measures itself and resizes to fit, so a short queue leaves no dead space. `Settings…` is still omitted until 7.4 builds the window behind it. |
+| 2026-08-19 23:05 | 6.4 placement confirmed on hardware — tray icon at physical x=3732 on a second display (origin x=1800) resolves to a popover at (3618, 36), directly under the icon. Diagnostic removed. The original bug was primary-monitor-based math on a multi-display setup. |
+| 2026-08-19 22:55 | 6.4 popover placement fixed — it opened at the top-left corner, the last-resort position taken when the monitor lookup returns `None`. The monitor is now resolved from the tray icon's own point (as `checkpoint.rs` does), the icon rectangle is stored raw and converted against *that* monitor's scale, and a known anchor is never discarded. A `TEMPORARY` diagnostic prints the anchor and the resolved position; remove it once placement is confirmed. |
+| 2026-08-19 22:35 | **Phase 6 complete** (7/7). Menu bar item, popover window, `Cmd+Shift+T`, relaunch → popover (test 21, pending manual verification). Title logic landed as a pure `core::menubar` with 6 tests. Main window close now hides instead of destroying (SPEC §7.3). Three window-plumbing commands added; `Settings` deferred to 7.4 rather than stubbed. |
+| 2026-08-19 21:40 | **Phase 5 complete** (10/10). Checkpoint window verified by hand — full-screen, fronts from another app (Test 5), refuses `Cmd+W`/`Esc`. Task 8.0 added: remove the temporary 1-minute test durations. |
+| 2026-08-19 21:25 | **Phase 4 complete** (9/9). Drag-to-reorder pulled forward from 7.1. Noted `PendingDecision` as a Phase 4 stand-in for the real checkpoint window.                              |
+| 2026-08-19 21:10 | **Phase 3 complete** (6/7). 3.4 marked *mechanism changed* — the tick thread sleeps against wall time, so a wake resolves expiry without an `NSWorkspace` observer. Settings repo deferred to Phase 7. |
+| 2026-08-19 21:00 | **Phase 2 complete** (8/8). Anti-loophole guarantee mutation-checked: sabotaging `start_task` fails tests 14–15 as intended.                                                    |
+| 2026-08-19 20:55 | Task 7.11 added — quit confirm while a block is running (D14).                                                                                                                  |
+| 2026-08-19 20:50 | Q3/Q4 closed (D12/D13). Tasks 5.10, 6.7, 7.9, 7.10 added; tests 20–22 added to the coverage map.                                                                                |
+| 2026-08-19 20:45 | Q1/Q2/Q5 closed. Task 5.4 rewritten for the 2×2 checkpoint.                                                                                                                     |
+| 2026-08-19 20:40 | **Phase 1 complete** (7/7). Q7 (Rust toolchain) closed. 1.3 amended — no SQL plugin, the database is Rust-only.                                                                 |
+| 2026-08-19 20:25 | Q6 closed — TS mirror narrowed to formatters plus countdown interpolation; all decision logic stays in Rust.                                                                    |
+| 2026-08-19 20:15 | Initial version — 8 phases, 60 tasks, acceptance-test coverage map, 5 open questions.                                                                                          |
 
 ---
 
@@ -16,10 +40,10 @@ Update the status marks in this file as work lands. Everything here is derived f
 | 3 | Persistence & recovery | 6 / 7 | ✅ Done (3.4 by a different mechanism — see note) |
 | 4 | Main window UI | 9 / 9 | ✅ Done |
 | 5 | Expiration checkpoint | 10 / 10 | ✅ Done |
-| 6 | Menu bar | 0 / 7 | ⬜ Not started |
+| 6 | Menu bar | 7 / 7 | ✅ Done (test 21 still needs a manual pass) |
 | 7 | Polish | 0 / 11 | ⬜ Not started |
-| 8 | Release | 0 / 6 | ⬜ Not started |
-| | **Total** | **40 / 65** | |
+| 8 | Release | 0 / 7 | ⬜ Not started |
+| | **Total** | **47 / 66** | |
 
 **Status key:** ⬜ Not started · 🟡 In progress · ✅ Done · ⛔ Blocked · ⏸ Deferred
 
@@ -115,6 +139,9 @@ Update the status marks in this file as work lands. Everything here is derived f
 
 **Goal:** the feature the product exists for.
 **Exit criteria:** acceptance tests 1–5 and 17–20 verified on the built app, including with the app hidden.
+**✅ Met 2026-08-19** — `RUNNING → AWAITING_DECISION` confirmed on the shipped binary via the tick loop. Window behavior confirmed by Gigih running `tauri:dev`: the checkpoint appears full-screen, comes to the front from another app (**Test 5**), refuses `Cmd+W` and `Esc`, and a decision dismisses it and starts the next task.
+
+> **Temporary for testing:** a `1 min (test)` task duration and a `1m` break length. Both marked `TEMPORARY` in source and tracked as cleanup task 8.0 — `grep TEMPORARY src/` finds them.
 
 | # | Task | Status | Notes |
 |---|---|---|---|
@@ -135,16 +162,25 @@ Update the status marks in this file as work lands. Everything here is derived f
 
 **Goal:** a full day never requires the main window.
 **Exit criteria:** every routine action is reachable from the popover.
+**✅ Met 2026-08-19** — `cargo test` (54 passed), `cargo clippy -D warnings`, `npm run typecheck`, `vite build` all clean. Acceptance test 21 is written but still needs a manual pass on a built `.app`.
+
+> **What the title says lives in `core::menubar`, not in the tray module.** `title(state, now, show_timer)` is a pure function with its own tests, so "what the menu bar reads in state X" is provable without launching anything. `platform/tray.rs` only pushes the resulting string at macOS.
+>
+> **The popover is a window, not an `NSPopover`.** Tauri exposes no native popover, so it is an undecorated always-on-top window anchored under the tray icon that hides on blur. A 300 ms re-open guard is what stops the blur-then-click sequence from immediately reopening what the click was meant to dismiss.
+>
+> **`Settings` is deliberately absent from the popover footer.** SPEC §7.2 lists it, but the settings window is task 7.4 — a button that opened the main window instead would be a lie about where settings are. It lands with 7.4.
 
 | # | Task | Status | Notes |
 |---|---|---|---|
-| 6.1 | Menu bar item with template image (adapts to light/dark) | ⬜ | |
-| 6.2 | Dynamic title: `◉ 24:17` / `◉ PAUSED` / `◔ BREAK 4:12` / `⚠ TIME'S UP` | ⬜ | SPEC §7.1 |
-| 6.3 | Title updates at most 1 Hz, driven by the Rust tick | ⬜ | Battery |
-| 6.4 | Popover — current, countdown, next, Pause/Skip, queue, menu | ⬜ | SPEC §7.2 |
-| 6.5 | `menuBarShowTimer` setting honored | ⬜ | |
-| 6.6 | `Cmd+Shift+T` global shortcut toggles popover | ⬜ | |
-| 6.7 | Relaunch of a running instance opens the popover | ⬜ | D12; Test 21 |
+| 6.1 | Menu bar item with template image (adapts to light/dark) | ✅ | Ring glyph generated as RGBA in `tray.rs`, `icon_as_template(true)`; replaced by the real icon in 8.1 |
+| 6.2 | Dynamic title: `◉ 24:17` / `◉ PAUSED` / `◔ BREAK 4:12` / `⚠ TIME'S UP` | ✅ | `core/menubar.rs`, 6 tests. Minutes are zero-padded (`BREAK 04:12`) so the title cannot change width mid-countdown |
+| 6.3 | Title updates at most 1 Hz, driven by the Rust tick | ✅ | Refreshed from the tick callback and from `dispatch`; the push is skipped when the string is unchanged |
+| 6.4 | Popover — current, countdown, next, Pause/Skip, queue, menu | ✅ | `src/components/Popover.tsx`, 320×420, hides on blur. At a checkpoint it shows no controls — the checkpoint has no side doors. Placement verified on a two-display setup. Styled from the prototype, not the spec's bullet list |
+| 6.5 | `menuBarShowTimer` setting honored | ✅ | Read from `settings` at startup via `Db::menu_bar_show_timer`; `tray::set_show_timer` is the hook for 7.4's settings window |
+| 6.6 | `Cmd+Shift+T` global shortcut toggles popover | ✅ | Registration failure is logged, never fatal |
+| 6.7 | Relaunch of a running instance opens the popover | ✅ | `single_instance` handler; test 21 still needs the manual pass |
+
+**Also landed here** (required by the above, not new scope): closing the main window now hides it rather than destroying it, and `open_main_window` rebuilds it if it is gone (SPEC §7.3). Commands `open_main_window`, `close_popover`, `quit_app` were added for the popover footer. `quit_app` exits directly — D14's quit confirmation is task 7.11.
 
 ---
 
@@ -172,6 +208,8 @@ Update the status marks in this file as work lands. Everything here is derived f
 
 | # | Task | Status | Notes |
 |---|---|---|---|
+| 8.0 | **Remove the temporary 1-minute test durations** — task duration select and break-length selector | ⬜ | Added 2026-08-19 to make the checkpoint testable; both marked `TEMPORARY` in source |
+| 8.0 | **Remove the temporary 1-minute test durations** — task duration select and break-length selector | ⬜ | Both marked `TEMPORARY` in source |
 | 8.1 | Real app icon, all required sizes | ⬜ | |
 | 8.2 | Universal binary (`universal-apple-darwin`) | ⬜ | Apple Silicon + Intel |
 | 8.3 | Developer ID signing | ⬜ | |
@@ -207,7 +245,7 @@ Every test in SPEC §12 is owned by a phase. None may be left unassigned.
 | 18 | Break does not auto-advance | 2, 5 | ✅ |
 | 19 | Break accounting | 2, 7 | ✅ |
 | 20 | Staleness line + `Away` | 5, 7 | ✅ |
-| 21 | Relaunch opens popover | 6 | ⬜ |
+| 21 | Relaunch opens popover | 6 | 🟡 Built; manual pass pending |
 | 22 | Break survives sleep/restart | 3 | ✅ |
 
 Tests 9, 14, and 15 encode the product thesis. If any of them regress, the app has stopped being what it is for.

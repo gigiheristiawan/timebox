@@ -76,4 +76,15 @@ impl Db {
         self.with(|c| c.query_row("PRAGMA journal_mode", [], |r| r.get(0)))
     }
 
+    /// The one setting the menu bar needs before the settings repository lands
+    /// with the settings window in Phase 7 (SPEC §7.1).
+    pub fn menu_bar_show_timer(&self) -> AppResult<bool> {
+        self.with(|c| {
+            c.query_row("SELECT menu_bar_show_timer FROM settings WHERE id = 1", [], |r| {
+                r.get::<_, i64>(0)
+            })
+        })
+        .map(|v| v != 0)
+    }
+
 }

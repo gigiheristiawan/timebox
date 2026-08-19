@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main window. Deliberately narrow: no filesystem, no shell, no SQL.",
-  "windows": ["main", "checkpoint"],
+  "description": "Capabilities for the app's windows. Deliberately narrow: no filesystem, no shell, no SQL.",
+  "windows": ["main", "checkpoint", "popover"],
   "permissions": [
     "core:default",
+    "core:window:allow-set-size",
     "notification:default",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister"

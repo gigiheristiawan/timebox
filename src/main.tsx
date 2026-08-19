@@ -2,12 +2,19 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { Checkpoint } from "./components/Checkpoint";
+import { Popover } from "./components/Popover";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./styles.css";
 
-// Both windows load this bundle; the window's own label decides what it is.
-const isCheckpoint = getCurrentWindow().label === "checkpoint";
+// Every window loads this bundle; the window's own label decides what it is.
+const label = getCurrentWindow().label;
+document.body.dataset.surface = label;
+
+const surface = {
+  checkpoint: <Checkpoint />,
+  popover: <Popover />,
+}[label] ?? <App />;
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>{isCheckpoint ? <Checkpoint /> : <App />}</React.StrictMode>,
+  <React.StrictMode>{surface}</React.StrictMode>,
 );

@@ -15,6 +15,7 @@ export default {
         rest: { DEFAULT: "var(--rest)", soft: "var(--rest-soft)", ink: "var(--rest-ink)" },
         warn: { DEFAULT: "var(--warn)", soft: "var(--warn-soft)" },
       },
+      boxShadow: { pop: "var(--shadow)" },
       fontFamily: {
         sans: ["-apple-system", "BlinkMacSystemFont", "system-ui", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],

@@ -6,17 +6,22 @@ mod db;
 mod error;
 
 use db::Db;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, WindowEvent};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+
+/// SPEC §9. Registered app-wide so the popover is reachable without hunting for
+/// the menu bar icon, which the notch can hide entirely (D12).
+fn toggle_popover_shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyT)
+}
 
 pub fn run() {
     tauri::Builder::default()
-        // A second launch focuses the running instance rather than starting a
-        // rival timer against the same database.
+        // A second launch opens the popover rather than starting a rival timer
+        // against the same database. Merely focusing an invisible accessory app
+        // reads as a broken launch (D12, acceptance test 21).
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
+            platform::popover::show(app);
         }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -27,22 +32,47 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let db = Db::open(&dir)?;
+            platform::tray::set_show_timer(db.menu_bar_show_timer()?);
 
             // Expiry is resolved here, before any window can render. A block
             // that ended while the app was closed or the Mac was asleep must
             // appear as a checkpoint, never as a running or reset timer.
             let state = state::App::hydrate(db, state::now_ms())?;
 
-            // Effects beyond ticking (checkpoint window, sound, notification)
-            // are wired in Phases 5 and 6; the tick loop already drives the
-            // state machine correctly without them.
-            // The tick loop nudges the UI once a second while a block runs.
-            // Between nudges the UI interpolates locally, so the countdown is
-            // smooth without a command per frame.
+            platform::tray::init(app.handle())?;
+            platform::tray::refresh(app.handle(), &state.snapshot(), state::now_ms());
+
+            // Closing the main window hides it; the app lives in the menu bar
+            // and only Quit ends it (SPEC §7.3).
+            if let Some(main) = app.get_webview_window("main") {
+                let w = main.clone();
+                main.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = w.hide();
+                    }
+                });
+            }
+
             let handle = app.handle().clone();
+            app.global_shortcut()
+                .on_shortcut(toggle_popover_shortcut(), move |app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        platform::popover::toggle(app);
+                    }
+                })
+                .unwrap_or_else(|e| eprintln!("[timebox] Cmd+Shift+T unavailable: {e}"));
+
+            // The tick loop nudges the UI once a second while a block runs, and
+            // is also what paces the menu bar title (task 6.3). Between nudges
+            // the UI interpolates locally, so the countdown is smooth without a
+            // command per frame.
+            let ticker_handle = handle.clone();
+            let app_state = state.clone();
             state.start_ticking(move |fx| {
-                platform::checkpoint::apply(&handle, fx);
-                let _ = handle.emit("timebox://changed", ());
+                platform::checkpoint::apply(&ticker_handle, fx);
+                platform::tray::refresh(&ticker_handle, &app_state.snapshot(), state::now_ms());
+                let _ = ticker_handle.emit("timebox://changed", ());
             });
 
             app.manage(state);
@@ -57,7 +87,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::get_snapshot,
-            commands::dispatch
+            commands::dispatch,
+            commands::open_main_window,
+            commands::close_popover,
+            commands::quit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running TimeBox");

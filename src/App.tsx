@@ -9,7 +9,7 @@ import { PendingDecision } from "./components/PendingDecision";
 const BREAK_MINUTES = 10; // From settings in Phase 7.
 
 export default function App() {
-  const { snap, error, init, send } = useTimebox();
+  const { error, init, send } = useTimebox();
 
   useEffect(() => {
     let un: (() => void) | undefined;
@@ -55,14 +55,9 @@ export default function App() {
   }, [send]);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-5 p-6">
-      <header className="flex items-baseline gap-3">
-        <h1 className="text-base font-semibold tracking-tight">TimeBox</h1>
-        <span className="font-mono text-[10px] uppercase tracking-[0.17em] text-ink-3">
-          {snap?.state.timerState ?? "…"}
-        </span>
-      </header>
-
+    // `.win-body` in docs/mockup.html. No in-window title: the native title bar
+    // already names the app, and the prototype's body starts at Current task.
+    <main className="flex min-h-screen flex-col gap-[18px] px-5 pb-5 pt-[18px]">
       {error && <p className="rounded-lg bg-alert-soft px-4 py-3 text-sm text-alert">{error}</p>}
 
       <PendingDecision breakMinutes={BREAK_MINUTES} />

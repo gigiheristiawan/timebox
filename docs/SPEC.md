@@ -6,6 +6,27 @@
 
 ---
 
+## Changelog
+
+All entries below are from a single working session on 2026-08-19. Hours before 21:55 are **reconstructed and approximate** — per-change timestamps were not recorded at the time. Entries from 21:55 onward are exact.
+
+| Date (WIB)       | Change                                                                                                                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-19 21:05 | §6: recorded *why* quitting does not stop the clock — pausing on quit would let a block be banked, the same loophole D10 closes. Noted the actual-duration cap.                    |
+| 2026-08-19 20:55 | **D14** — quit confirmation while a block is running (Pause & Quit / Quit / Cancel). Two edge cases.                                                                              |
+| 2026-08-19 22:35 | §7.1 corrected — the break example read `◔ BREAK 4:12`; minutes are zero-padded like every other clock in the app, so an unpadded minute would shift the menu bar's width once a minute. Implemented as `◔ BREAK 04:12` in `core::menubar`. |
+| 2026-08-19 20:50 | **D12** (first-run discoverability) and **D13** (staleness line + `Away` total). Tests 20–21 added; old test 20 renumbered to 22.                                                 |
+| 2026-08-19 20:45 | Q1/Q2/Q5 resolved. **D7 rewritten**: break is a modifier on *either* task decision, so the checkpoint became a 2×2 of compound actions plus Extend. D9 confirmed. Test 17b added. |
+| 2026-08-19 20:35 | **R5 corrected** to `rusqlite` — `tauri-plugin-sql` exists to let the *frontend* run SQL, contradicting R6. **R7 reversed**: the TS mirror narrowed to formatters only.            |
+| 2026-08-19 20:20 | §10.3 Stack Rationale added (R1–R8, each labelled *Inherited* vs *Chosen*). §13 replaced by a pointer to IMPLEMENTATION_PLAN.md so the two cannot drift.                          |
+| 2026-08-19 20:04 | Moved into `docs/` alongside the handoff and prototype.                                                                                                                          |
+| 2026-08-19 19:55 | **D10 corrected** — switching *parks* a block rather than terminating it, and returning resumes the remainder. Without this, switching away and back re-granted a full block, letting one task consume unlimited time. Anti-loophole tests 14–15 added; D1 scoped to blocks that ran their course. |
+| 2026-08-19 19:40 | **D10/D11** — mid-block task switching. Resolved §9's `Enter — Start selected task` contradicting §5.2, which had no transition for it.                                            |
+| 2026-08-19 19:20 | **D7–D9** — breaks as time blocks with no task, reusing the existing state machine rather than adding a mode.                                                                     |
+| 2026-08-19 14:30 | Initial version — D1–D6, data model, timer state machine, §11 edge cases, acceptance tests 1–12.                                                                                  |
+
+---
+
 ## 1. Product Definition
 
 TimeBox is a native macOS menu bar utility that enforces **time allocation across multiple tasks**, rather than continuous focus on one.
@@ -248,7 +269,7 @@ Title text reflects state, updated at most 1 Hz:
 | State | Title |
 |---|---|
 | RUNNING (work) | `◉ 24:17` (mm:ss; `h:mm:ss` above 1h) |
-| RUNNING (break) | `◔ BREAK 4:12` |
+| RUNNING (break) | `◔ BREAK 04:12` |
 | PAUSED | `◉ PAUSED` |
 | AWAITING_DECISION | `⚠ TIME'S UP` |
 | IDLE | icon only |

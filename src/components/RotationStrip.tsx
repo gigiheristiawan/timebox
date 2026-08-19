@@ -1,5 +1,6 @@
 import { useTimebox, currentBlock, isBreak, parkedFor, queuedMs, taskById } from "../stores/useTimebox";
 import { remainingMs } from "../core/format";
+import { SectionLabel } from "./ui";
 
 /**
  * The day as a playlist: each queued task is a segment sized by the time it
@@ -28,46 +29,68 @@ export function RotationStrip() {
   };
 
   return (
-    <div className="flex h-6 overflow-hidden rounded-md border border-line bg-surface-2">
-      {onBreak && block && (
-        <Segment widthPct={(breakMs / total) * 100} fillPct={progress(block)} tone="rest" label="Break" />
-      )}
-      {ids.map((id) => {
-        const isCurrent = block?.taskId === id && snap.state.timerState !== "Idle";
-        const t = taskById(snap, id);
-        return (
+    <section className="flex flex-col gap-[7px]">
+      <SectionLabel>Rotation</SectionLabel>
+      <div className="flex h-[26px] overflow-hidden rounded-md border border-line bg-surface-2">
+        {onBreak && block && (
           <Segment
-            key={id}
-            widthPct={(queuedMs(snap, id) / total) * 100}
-            fillPct={isCurrent && block ? progress(block) : 0}
-            tone={isCurrent ? "accent" : parkedFor(snap, id) ? "parked" : "idle"}
-            label={t?.title.split(" ")[0] ?? ""}
+            widthPct={(breakMs / total) * 100}
+            fillPct={progress(block)}
+            tone="rest"
+            label={`◔ ${mins(breakMs)}m`}
           />
-        );
-      })}
-    </div>
+        )}
+        {ids.map((id) => {
+          const isCurrent = block?.taskId === id && snap.state.timerState !== "Idle";
+          const t = taskById(snap, id);
+          const ms = queuedMs(snap, id);
+          return (
+            <Segment
+              key={id}
+              widthPct={(ms / total) * 100}
+              fillPct={isCurrent && block ? progress(block) : 0}
+              tone={isCurrent ? "accent" : "idle"}
+              parked={parkedFor(snap, id) != null}
+              label={`${t?.title.split(" ")[0] ?? ""} · ${mins(ms)}m`}
+            />
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
+const mins = (ms: number) => Math.round(ms / 60_000);
+
+/** `.seg-t` in docs/mockup.html. Parked is a marker on the segment, not a tone:
+ *  a parked task is still an ordinary queued segment, underlined to show it
+ *  carries a remainder rather than a full allocation. */
 function Segment({
-  widthPct, fillPct, tone, label,
-}: { widthPct: number; fillPct: number; tone: "accent" | "rest" | "parked" | "idle"; label: string }) {
+  widthPct, fillPct, tone, label, parked = false,
+}: {
+  widthPct: number;
+  fillPct: number;
+  tone: "accent" | "rest" | "idle";
+  label: string;
+  parked?: boolean;
+}) {
   const bg =
     tone === "accent" ? "bg-accent-soft text-accent-ink"
     : tone === "rest" ? "bg-rest-soft text-rest-ink"
-    : tone === "parked" ? "bg-warn-soft text-warn"
     : "text-ink-3";
   const fill = tone === "rest" ? "bg-rest" : "bg-accent";
   return (
     <div
-      className={`relative flex min-w-[8px] items-center overflow-hidden border-r border-line px-1.5 last:border-r-0 ${bg}`}
+      className={`relative flex min-w-[8px] items-center overflow-hidden whitespace-nowrap border-r border-line px-1.5 last:border-r-0 ${bg} ${
+        parked ? "border-b-2 border-b-warn" : ""
+      }`}
       style={{ width: `${widthPct}%` }}
       title={label}
     >
       {fillPct > 0 && (
         <div className={`absolute inset-y-0 left-0 opacity-30 ${fill}`} style={{ width: `${fillPct}%` }} />
       )}
-      <span className="relative truncate font-mono text-[10px]">{label}</span>
+      <span className="relative font-mono text-[10px]">{label}</span>
     </div>
   );
 }

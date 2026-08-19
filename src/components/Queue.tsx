@@ -31,7 +31,7 @@ export function Queue() {
   return (
     <section className="flex flex-col gap-2">
       <SectionLabel>Up next — click to switch, drag to reorder</SectionLabel>
-      <div ref={listRef} className="flex flex-col gap-1">
+      <div ref={listRef} className="flex flex-col gap-[5px]">
         {upNext.length === 0 && (
           <p className="py-2 text-sm text-ink-3">Nothing queued behind the current task.</p>
         )}
@@ -67,7 +67,7 @@ export function Queue() {
                 if (dragging && dragging !== id) void send({ kind: "reorder", moved: dragging, before: id });
                 setDragging(null); setOver(null);
               }}
-              className={`group flex cursor-grab items-center gap-2.5 rounded-lg border px-2.5 py-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+              className={`group flex cursor-grab items-center gap-2.5 rounded-lg border px-[9px] py-[7px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                 over === id ? "border-accent bg-accent-soft"
                 : left != null ? "border-transparent bg-warn-soft"
                 : "border-transparent bg-surface-2 hover:border-line-2"
@@ -75,12 +75,12 @@ export function Queue() {
             >
               <span className="shrink-0 text-ink-3">⠿</span>
               <span className="w-4 shrink-0 font-mono text-[11px] text-ink-3">{i + 1}</span>
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${PRIORITY_DOT[task.priority]}`} />
+              <span className={`h-[5px] w-[5px] shrink-0 rounded-full ${PRIORITY_DOT[task.priority]}`} />
               <span className="min-w-0 flex-1 truncate text-[13.5px]">{task.title}</span>
               <span className={`font-mono text-[11.5px] ${left != null ? "font-medium text-warn" : "text-ink-2"}`}>
                 {left != null ? `${clockStr(left)} left` : durStr(task.blockDurationMs)}
               </span>
-              <span className="rounded bg-accent-soft px-1.5 py-0.5 font-mono text-[10.5px] text-accent-ink opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+              <span className="rounded-[5px] bg-accent-soft px-[7px] py-[2px] font-mono text-[10.5px] text-accent-ink opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                 {left != null ? "Resume ▶" : "Start ▶"}
               </span>
               <button

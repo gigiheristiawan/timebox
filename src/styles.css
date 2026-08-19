@@ -14,6 +14,7 @@
   --alert: #b93c22; --alert-soft: #f6dfd8;
   --rest: #3c6e8f; --rest-soft: #dee9f1; --rest-ink: #2a5471;
   --warn: #8a6512; --warn-soft: #f4ebd4;
+  --shadow: 0 20px 50px -12px rgba(12, 30, 24, 0.34), 0 2px 6px rgba(12, 30, 24, 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -26,6 +27,7 @@
     --alert: #f0765c; --alert-soft: #3a1d16;
     --rest: #6facd0; --rest-soft: #1a2a35; --rest-ink: #9ccbe4;
     --warn: #d9ae55; --warn-soft: #33290f;
+    --shadow: 0 22px 55px -14px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(0, 0, 0, 0.4);
   }
 }
 
@@ -38,6 +40,7 @@
   --alert: #f0765c; --alert-soft: #3a1d16;
   --rest: #6facd0; --rest-soft: #1a2a35; --rest-ink: #9ccbe4;
   --warn: #d9ae55; --warn-soft: #33290f;
+  --shadow: 0 22px 55px -14px rgba(0, 0, 0, 0.7), 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 
 @layer base {
@@ -48,4 +51,31 @@
   }
   /* Digits that sit in columns must not jitter as they count down. */
   .tabular { font-variant-numeric: tabular-nums; }
+  /* The popover is a floating card, not a page: the window behind its rounded
+     corners must show nothing at all. */
+  body[data-surface="popover"] { @apply bg-transparent; }
+  /* The main window is a document surface, not the desktop behind one — this is
+     `.win` in docs/mockup.html, which paints `--surface`. */
+  body[data-surface="main"] { @apply bg-surface; }
+}
+
+/* Controls whose exact look matters, ported from docs/mockup.html rather than
+   approximated. Native macOS select chrome is replaced outright: the prototype's
+   flat control is the design, and WKWebView's stepper is not it. */
+@layer components {
+  .field {
+    @apply rounded-[7px] border border-line-2 bg-surface px-[9px] py-1.5 text-[13px] text-ink;
+  }
+  .field:focus {
+    @apply border-accent outline outline-2 -outline-offset-1 outline-accent;
+  }
+  select.field {
+    appearance: none;
+    /* Chevron drawn in the ink-3 token; encoded because CSS masks cannot read
+       a custom property inside a data URI. */
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%237c8a85' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+    @apply pr-[26px];
+  }
 }

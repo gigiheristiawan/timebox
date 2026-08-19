@@ -32,9 +32,7 @@ export function AddTask() {
           placeholder="Add a task…  (N)"
           aria-label="Task title"
           aria-invalid={invalid}
-          className={`w-full rounded-md border bg-surface px-2.5 py-1.5 text-[13px] focus:outline-none focus:ring-2 focus:ring-accent ${
-            invalid ? "border-alert" : "border-line-2"
-          }`}
+          className={`field w-full ${invalid ? "!border-alert" : ""}`}
         />
         {invalid && <span className="text-[11px] text-alert">A task needs a title.</span>}
       </div>
@@ -42,15 +40,18 @@ export function AddTask() {
         value={minutes}
         onChange={(e) => setMinutes(Number(e.target.value))}
         aria-label="Block duration"
-        className="rounded-md border border-line-2 bg-surface px-2 py-1.5 text-[13px]"
+        className="field"
       >
+        {/* TEMPORARY: 1-minute blocks make the expiration checkpoint testable
+            without waiting. Remove before release — tracked as Phase 8 cleanup. */}
+        <option value={1}>1 min (test)</option>
         {[15, 25, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}
       </select>
       <select
         value={priority}
         onChange={(e) => setPriority(e.target.value as Priority)}
         aria-label="Priority"
-        className="rounded-md border border-line-2 bg-surface px-2 py-1.5 text-[13px]"
+        className="field"
       >
         <option value="High">High</option>
         <option value="Medium">Medium</option>
@@ -58,7 +59,7 @@ export function AddTask() {
       </select>
       <button
         type="submit"
-        className="rounded-md border border-line-2 bg-surface px-3 py-1.5 text-sm font-medium hover:bg-surface-3"
+        className="rounded-[7px] border border-line-2 bg-surface px-[13px] py-1.5 text-[13px] font-medium transition-colors hover:bg-surface-3"
       >
         Add
       </button>

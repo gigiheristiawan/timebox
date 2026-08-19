@@ -14,7 +14,11 @@ export function Chip({ children, tone = "plain" }: { children: ReactNode; tone?:
     rest: "bg-rest-soft text-rest-ink",
     alert: "bg-alert-soft text-alert",
   }[tone];
-  return <span className={`rounded px-1.5 py-0.5 font-mono text-[10.5px] ${cls}`}>{children}</span>;
+  return (
+    <span className={`rounded-[5px] px-[7px] py-[2px] font-mono text-[10.5px] tracking-[0.04em] ${cls}`}>
+      {children}
+    </span>
+  );
 }
 
 export function Button({
@@ -28,16 +32,16 @@ export function Button({
   className?: string;
 }) {
   const base =
-    "rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-default";
+    "rounded-[7px] px-[13px] py-1.5 text-[13px] font-medium transition-colors disabled:opacity-[.42] disabled:cursor-default";
   const look = {
     default: "border border-line-2 bg-surface hover:bg-surface-3",
-    primary: "border border-accent bg-accent text-white hover:brightness-110",
-    ghost: "text-ink-2 hover:bg-surface-3",
+    primary: "border border-accent bg-accent text-white hover:brightness-[1.08]",
+    ghost: "border border-transparent text-ink-2 hover:bg-surface-3",
   }[variant];
   return (
     <button type="button" onClick={onClick} disabled={disabled} className={`${base} ${look} ${className}`}>
       {children}
-      {hint && <span className="ml-1.5 font-mono text-[10px] opacity-55">{hint}</span>}
+      {hint && <span className="ml-[5px] font-mono text-[10px] opacity-55">{hint}</span>}
     </button>
   );
 }

@@ -18,16 +18,16 @@ export function CurrentPanel() {
     return (
       <section className="flex flex-col gap-3">
         <SectionLabel>On a break</SectionLabel>
-        <div className="flex items-start gap-4">
-          <div className="flex flex-col gap-2">
-            <h2 className="text-lg font-semibold tracking-tight text-rest-ink">Break</h2>
+        <div className="flex items-start gap-[14px]">
+          <div className="flex flex-col gap-[7px]">
+            <h2 className="text-[19px] font-semibold leading-[1.25] tracking-[-0.01em] text-rest-ink">Break</h2>
             <div className="flex flex-wrap gap-1.5">
               <Chip tone="rest">{durStr(block.plannedMs)} break</Chip>
               {block.extensionMs > 0 && <Chip tone="warn">Extended +{durStr(block.extensionMs)}</Chip>}
               {next && <Chip>Next up · {next.title}</Chip>}
             </div>
           </div>
-          <Countdown className="ml-auto text-3xl font-medium tracking-tight text-rest" />
+          <Countdown className="ml-auto flex-none text-[30px] font-medium tracking-[-0.02em] text-rest" />
         </div>
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => send({ kind: "extendBreak", ms: 5 * 60_000 })}>+5 min</Button>
@@ -63,9 +63,9 @@ export function CurrentPanel() {
   return (
     <section className="flex flex-col gap-3">
       <SectionLabel>Current task</SectionLabel>
-      <div className="flex items-start gap-4">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-lg font-semibold leading-tight tracking-tight">{task.title}</h2>
+      <div className="flex items-start gap-[14px]">
+        <div className="flex flex-col gap-[7px]">
+          <h2 className="text-[19px] font-semibold leading-[1.25] tracking-[-0.01em]">{task.title}</h2>
           <div className="flex flex-wrap gap-1.5">
             <Chip tone="accent">Block {blockNumber} · {durStr(block.plannedMs)}</Chip>
             {block.extensionMs > 0 && <Chip tone="warn">Extended +{durStr(block.extensionMs)}</Chip>}
@@ -75,7 +75,7 @@ export function CurrentPanel() {
             {paused && <Chip>Paused — allocation held</Chip>}
           </div>
         </div>
-        <Countdown className={`ml-auto text-3xl font-medium tracking-tight ${paused ? "text-ink-3" : ""}`} />
+        <Countdown className={`ml-auto flex-none text-[30px] font-medium tracking-[-0.02em] ${paused ? "text-ink-3" : ""}`} />
       </div>
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => send({ kind: paused ? "resume" : "pause" })} hint="Space">
