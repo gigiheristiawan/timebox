@@ -20,8 +20,8 @@ const ID: &str = "timebox";
 /// the spec allows (task 6.3).
 static LAST_TITLE: Mutex<String> = Mutex::new(String::new());
 
-/// `menuBarShowTimer`. Read from settings at startup; the settings UI lands in
-/// Phase 7 and will flip it through `set_show_timer`.
+/// `menuBarShowTimer`. Read from settings at startup and flipped by the
+/// settings window through `set_show_timer`.
 static SHOW_TIMER: AtomicBool = AtomicBool::new(true);
 
 pub fn set_show_timer(on: bool) {
@@ -30,7 +30,7 @@ pub fn set_show_timer(on: bool) {
 
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
     TrayIconBuilder::with_id(ID)
-        .icon(ring_icon())
+        .icon(tray_icon())
         // A template image is monochrome + alpha; macOS recolors it for the
         // active menu bar. Without this the icon is invisible in one theme.
         .icon_as_template(true)
@@ -62,24 +62,22 @@ pub fn refresh(app: &AppHandle, state: &MachineState, now: crate::core::model::M
     }
 }
 
-/// A ring — the `◉` of the title, drawn rather than shipped as an asset so the
-/// placeholder cannot drift out of sync with the real icon work in task 8.1.
-/// Black with an anti-aliased alpha edge; as a template image only the alpha is
-/// used, so the colour is irrelevant.
-fn ring_icon() -> Image<'static> {
-    const SIDE: u32 = 36; // 18pt at 2×, the usual menu bar glyph size.
-    const OUTER: f64 = 8.0;
-    const INNER: f64 = 4.6;
-    let center = (SIDE as f64 - 1.0) / 2.0;
+/// Push the title even if the text is unchanged. Turning `menuBarShowTimer`
+/// off produces an empty title, which the cached value would otherwise suppress
+/// on the way back — the tray would keep the last countdown it was given.
+pub fn refresh_forced(app: &AppHandle, state: &MachineState, now: crate::core::model::Millis) {
+    LAST_TITLE.lock().clear();
+    refresh(app, state, now);
+}
 
-    let mut rgba = Vec::with_capacity((SIDE * SIDE * 4) as usize);
-    for y in 0..SIDE {
-        for x in 0..SIDE {
-            let (dx, dy) = (x as f64 - center, y as f64 - center);
-            let d = (dx * dx + dy * dy).sqrt();
-            let alpha = ((OUTER - d).clamp(0.0, 1.0) * (d - INNER).clamp(0.0, 1.0) * 255.0) as u8;
-            rgba.extend_from_slice(&[0, 0, 0, alpha]);
-        }
-    }
-    Image::new_owned(rgba, SIDE, SIDE)
+/// The menu bar mark, exported artwork rather than drawn here — see
+/// `docs/RELEASE.md` §1. 36×36 (18pt at 2×) with the shape inset to 20×20, so
+/// it has the breathing room a menu bar glyph needs.
+///
+/// As a template image only the alpha channel survives; macOS repaints the
+/// shape for the active theme. That is why the asset is pure black with its
+/// cutouts as real transparency: any white would become an opaque blob.
+fn tray_icon() -> Image<'static> {
+    Image::from_bytes(include_bytes!("../../icons/tray.png"))
+        .expect("tray.png is compiled in and must decode")
 }
