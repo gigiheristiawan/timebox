@@ -13,6 +13,8 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 
 | Date (WIB)       | Change                                                                                                                                                                        |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-20 17:50 | **8.3 and 8.4 complete.** Signed, notarized, stapled universal build verified — all 7 checks in the new `scripts/verify-release.sh` pass, app and DMG both stapled. Supersedes the 16:45 entry. |
+| 2026-08-20 16:45 | **8.3/8.4 unblocked** — the Developer ID Application certificate exists, superseding every "blocked" entry below. Both are still open: the notarized build has not been produced. Added 8.7 (publish the release + Pages page); README, landing page, screenshots and MIT licence are in the repo. |
 | 2026-08-20 11:00 | **Bundle identifier changed** `com.timebox.app` → `xyz.gigiheristiawan.timebox`, before the first signed build rather than after. The identifier also names the data directory, so the existing database was copied to `~/Library/Application Support/xyz.gigiheristiawan.timebox/` (integrity check `ok`, 4 tasks / 8 blocks / schema 2). The old directory is left in place as a fallback and can be deleted once the rename is confirmed working. Earlier entries in this file naming the old path were rewritten, since the path they gave would otherwise send a reader to the wrong database. |
 | 2026-08-20 10:45 | 8.4 credentials created and validated: a project-specific `Developer`-role App Store Connect API key authenticates against the notary service, so the role question — which cannot be fixed after key creation — is settled. Phase 8 now hangs entirely on the Developer ID Application certificate. |
 | 2026-08-20 03:40 | **Correction:** the Apple Developer Program membership is active (shipped App Store apps); an earlier entry inferred otherwise from Xcode's empty Developer ID list. iOS distribution uses *Apple Distribution* certificates, so a Mac-only **Developer ID Application** certificate was simply never created. 8.4's credentials are already available through the existing App Store Connect `.p8` key, so both tasks now hinge on creating that one certificate. |
@@ -48,7 +50,7 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 | 5 | Expiration checkpoint | 10 / 10 | ✅ Done |
 | 6 | Menu bar | 7 / 7 | ✅ Done (test 21 still needs a manual pass) |
 | 7 | Polish | 11 / 11 | ✅ Done (surfaces need a manual pass) |
-| 8 | Release | 5 / 7 | 🟡 8.3/8.4 blocked on a Developer ID certificate |
+| 8 | Release | 7 / 8 | 🟡 signed, notarized, stapled build verified; 8.6 acceptance pass and 8.7 publish remain |
 | | **Total** | **63 / 66** | |
 
 **Status key:** ⬜ Not started · 🟡 In progress · ✅ Done · ⛔ Blocked · ⏸ Deferred
@@ -219,7 +221,11 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 ## Phase 8 — Release
 
 **Goal:** a build that can be handed to someone else.
-**Status 2026-08-20:** 8.0–8.2 and 8.5 done; **8.3/8.4 blocked on creating one Developer ID Application certificate**, which blocks 8.6 with them. (Corrected: the account *is* enrolled — an earlier note wrongly inferred otherwise from Xcode showing no such certificate. iOS App Store work never needs one.)
+**Status 2026-08-20 17:50:** 8.0–8.5 done. A signed, notarized, stapled
+universal build exists and passes every check in `./scripts/verify-release.sh`
+— including Gatekeeper and stapling on the **DMG**, which `tauri build` does not
+notarize on its own (RELEASE.md §3). Remaining: 8.6, the manual acceptance pass
+on that build, and 8.7, publishing it.
 
 **8.5 measured** on the universal build (`TimeBox.app`, 9.7 MB; DMG 5.3 MB):
 
@@ -239,10 +245,11 @@ The idle figure is the one the spec sets, and the condvar park holds exactly: ze
 | 8.0 | **Remove the temporary 1-minute test durations** — task duration select and break-length selector | ✅ | Both gone; `grep -r TEMPORARY src/` is now empty. The duration select instead offers the configured default when it falls outside the standard list |
 | 8.1 | Real app icon, all required sizes | ✅ | `src-tauri/icons/generate.py` — committed as a **script**, so the icon has a reviewable source. The mark is the same `◉` the tray draws, so Dock and menu bar read as one app |
 | 8.2 | Universal binary (`universal-apple-darwin`) | ✅ | `npm run tauri:build:universal`; both Rust targets installed. Verify with `lipo -archs` |
-| 8.3 | Developer ID signing | ⛔ | **Blocked on the certificate only — the configuration is verified.** A smoke-test build signed with the *Apple Development* cert passes `codesign --verify --deep --strict`, keeps the universal binary intact, embeds `TeamIdentifier=SQ3B3PDL4S`, and has the **hardened runtime on** (`flags=0x10000`), which is what notarization requires. `spctl` rejects it solely because a Development cert is not a Developer ID one. Distribution needs a **Developer ID Application** cert (paid membership); nothing in the repo changes when it arrives, since Tauri reads `APPLE_SIGNING_IDENTITY` from the environment. RELEASE.md §3 |
-| 8.4 | Notarization + stapling | ⛔ | **Blocked on 8.3 alone — credentials done.** A dedicated `Developer`-role App Store Connect API key was created for this project (separate from the EAS key, so revoking one cannot break the other) and **validated against Apple's notary service** on 2026-08-20. Unsigned builds stay dev-only — Gatekeeper quarantines them on any other Mac |
+| 8.3 | Developer ID signing | ✅ | **Done 2026-08-20.** Universal build signed with `Developer ID Application: Gigih Eristiawan (SQ3B3PDL4S)`, hardened runtime on, `x86_64 arm64` intact, `spctl` → *accepted, source=Notarized Developer ID*. The earlier smoke test had already established: A smoke-test build signed with the *Apple Development* cert passes `codesign --verify --deep --strict`, keeps the universal binary intact, embeds `TeamIdentifier=SQ3B3PDL4S`, and has the **hardened runtime on** (`flags=0x10000`), which is what notarization requires. `spctl` rejects it solely because a Development cert is not a Developer ID one. The **Developer ID Application** cert is now in the login keychain; nothing in the repo changed when it arrived, since Tauri reads `APPLE_SIGNING_IDENTITY` from the environment. RELEASE.md §3 |
+| 8.4 | Notarization + stapling | ✅ | **Done 2026-08-20**, verified by `./scripts/verify-release.sh` (all 7 checks green). One trap found and recorded in RELEASE.md §3: `tauri build` notarizes and staples the **`.app` only** — the DMG it wraps around it is signed but unnotarized, and needs its own `notarytool submit` + `stapler staple`. Both artifacts now carry tickets. A dedicated `Developer`-role App Store Connect API key was created for this project (separate from the EAS key, so revoking one cannot break the other) and **validated against Apple's notary service** on 2026-08-20. Unsigned builds stay dev-only — Gatekeeper quarantines them on any other Mac |
 | 8.5 | Performance check: < 80 MB idle, ~0% CPU when idle/paused | ✅ | Measured on the universal build — see the Phase 8 note below |
 | 8.6 | Full manual pass of acceptance tests 1–20 on the notarized build | ⬜ | Gigih's; needs 8.4 first, since "on the notarized build" is the point |
+| 8.7 | Publish: GitHub release with the notarized DMG + Pages landing page | ⬜ | README, `docs/index.html`, screenshots and MIT licence landed 2026-08-20. Procedure in RELEASE.md §6. Needs 8.4 — an unsigned DMG behind a public download link fails Gatekeeper for every visitor |
 
 ---
 

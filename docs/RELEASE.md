@@ -3,9 +3,10 @@
 How to produce a distributable TimeBox build. Phase 8 of
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Current state:** universal builds work unsigned. Signing and notarization are
-**blocked on credentials** — see §3. An unsigned build is dev-only: on another
-Mac it is quarantined and Gatekeeper refuses it.
+**Current state:** a signed, notarized, stapled universal 0.1.0 build exists and
+passes every check in `./scripts/verify-release.sh` — app and DMG both. Nothing
+is *published* yet: the DMG still has to be opened on a second Mac, and the
+GitHub release and Pages site (§6) have not been created.
 
 ---
 
@@ -13,6 +14,9 @@ Mac it is quarantined and Gatekeeper refuses it.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-20 17:30 | **`tauri build` notarizes the `.app` but not the DMG** — observed on the first Developer ID build: app `Notarized Developer ID` and stapled, DMG `Unnotarized Developer ID` with no ticket. §3 now carries the `notarytool submit` + `stapler staple` step for the container, and verification moved to `scripts/verify-release.sh`, which checks stapling on **both** artifacts. |
+| 2026-08-20 16:45 | **Unblocked:** the Developer ID Application certificate exists — `security find-identity` lists it. Supersedes every "blocked on credentials" line above and the old §3 title *one missing certificate*; §3 now reads as procedure, not a blocker. |
+| 2026-08-20 16:20 | §6 added — publishing: the GitHub release the download button points at, and Pages serving `docs/`. Icon paths in `docs/index.html` vendored under `docs/` so they survive publication. |
 | 2026-08-20 14:55 | The whole `src-tauri/icons/` directory is tracked, Windows/Android/iOS output included — §1 previously said to delete it. |
 | 2026-08-20 14:40 | §1: tray icon is now the exported asset `icons/tray.png` loaded by `platform/tray.rs`, no longer drawn in Rust. Export spec recorded. |
 | 2026-08-20 14:10 | §1 rewritten: the icon set is now **exported artwork**, not script output. `icons/generate.py` is no longer the source and must not be re-run — it would overwrite the design. |
@@ -98,11 +102,14 @@ lipo -archs src-tauri/target/universal-apple-darwin/release/bundle/macos/TimeBox
 # expected: x86_64 arm64
 ```
 
-## 3. Signing and notarization — one missing certificate
+## 3. Signing and notarization
 
 The account **is** enrolled in the Apple Developer Program (there are shipped
-App Store apps). The only missing piece is a **Developer ID Application**
-certificate.
+App Store apps), and the **Developer ID Application** certificate now exists —
+`Developer ID Application: Gigih Eristiawan (SQ3B3PDL4S)`, confirmed in the
+login keychain on 2026-08-20. Both halves are in place; skip to *Building signed
+and notarized* below. The rest of this section is why it was missing for so
+long, and how to recreate it on another machine.
 
 It was never created because iOS work does not use one: App Store distribution
 signs with *Apple Distribution* certificates, while **Developer ID Application
@@ -110,7 +117,7 @@ is Mac-only, for distribution outside the Mac App Store**. Different certificate
 same membership. An empty Developer ID list in Xcode is therefore expected here,
 not a sign of a missing membership.
 
-### The one thing to create
+### Creating it (done — kept for a new machine)
 
 Xcode → Settings → Accounts → select the Apple ID → **Manage Certificates** →
 **+** → **Developer ID Application**. Then confirm:
@@ -196,6 +203,8 @@ export APPLE_TEAM_ID="SQ3B3PDL4S"
 Tauri signs with the hardened runtime (required for notarization), submits to
 Apple, and staples the ticket when a complete set of either group is present.
 With neither, it signs and skips notarization with a warning rather than failing.
+This covers the `.app` only — the DMG needs the extra step below before it can be
+distributed.
 
 **Keep the `.p8` out of the repository.** Point `APPLE_API_KEY_PATH` at a file
 outside the working tree; a key committed to git must be revoked.
@@ -287,18 +296,73 @@ whole remaining gap.
 The hardened runtime being on is the load-bearing result — it is the usual cause
 of a first notarization rejection, and it is already correct.
 
+### `tauri build` does not notarize the DMG
+
+**Tauri notarizes and staples the `.app`, then builds the DMG around the already
+stapled app and signs it — it never submits the DMG itself.** So a build that
+looks entirely successful leaves the container in this state:
+
+```
+TimeBox.app                    accepted, source=Notarized Developer ID   ✅ stapled
+TimeBox_0.1.0_universal.dmg    rejected, source=Unnotarized Developer ID ❌ no ticket
+```
+
+Observed on the first real Developer ID build, 2026-08-20. It matters because
+the DMG is the artifact people download: the quarantine flag lands on *it*, and
+Gatekeeper evaluates *it* before the app inside is ever reached. Attaching this
+file to a release means a Gatekeeper block for every visitor, even though the
+app within is correctly notarized.
+
+Notarize the container as a second step, with the §3 credentials exported. No
+rebuild — stapling attaches a ticket to the existing file and does not touch the
+app inside it, so the app's own signature and ticket are unaffected:
+
+```bash
+DMG=src-tauri/target/universal-apple-darwin/release/bundle/dmg/TimeBox_0.1.0_universal.dmg
+
+xcrun notarytool submit "$DMG" \
+  --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
+  --wait
+xcrun stapler staple "$DMG"
+```
+
+`--wait` blocks until Apple returns a verdict, usually a few minutes. On
+`status: Invalid`, `xcrun notarytool log <submission-id>` with the same
+credentials gives the per-file reason.
+
 ### Verifying the result
+
+```bash
+./scripts/verify-release.sh
+```
+
+Seven checks — universal binary, signature validity, Developer ID authority,
+hardened runtime, Team ID, Gatekeeper, and stapling **on both the app and the
+DMG**. All of them run even when one fails, so one pass reports everything, and
+the exit status is 0 only if every check passed. The version is read from
+`tauri.conf.json`, so it does not go stale.
+
+It distinguishes the two failure shapes it can see: only-the-DMG failing means
+the build environment was right and the container just needs the step above,
+while an app-level failure means the §3 environment was missing from the shell
+that ran the build — in which case Tauri signs without notarizing, or skips
+signing entirely, and only warns.
+
+The individual commands, if you want them by hand:
 
 ```bash
 APP=src-tauri/target/universal-apple-darwin/release/bundle/macos/TimeBox.app
 codesign --verify --deep --strict --verbose=2 "$APP"
 spctl -a -vvv -t install "$APP"          # expect: accepted, source=Notarized Developer ID
 xcrun stapler validate "$APP"            # expect: The validate action worked!
+xcrun stapler validate "$DMG"            # the one tauri build does not satisfy
+spctl -a -vvv -t open --context context:primary-signature "$DMG"
 ```
 
 The real test is a *different* Mac: copy the DMG across, open it, and confirm no
 Gatekeeper warning. A build that passes `spctl` locally can still be quarantined
-elsewhere if the ticket was not stapled.
+elsewhere if the ticket was not stapled — this machine can fall back to an
+online check, and a Mac without network cannot.
 
 ## 4. Performance check
 
@@ -333,3 +397,56 @@ Measure again while `RUNNING`: one wakeup a second is expected.
 Acceptance tests 1–20 in [SPEC.md](SPEC.md) §12, run by hand on the notarized
 build. Tests 9, 14, and 15 encode the product thesis — if any of them fail, do
 not ship.
+
+## 6. Publishing — the download page
+
+Two independent pieces. **The DMG you attach must be the notarized, stapled one
+from §3** — an unsigned build behind a public download button is worse than no
+download button, because every visitor gets Gatekeeper's "damaged and can't be
+opened" — and `tauri build` does not produce a notarized DMG on its own. Run
+`./scripts/verify-release.sh` and require a clean exit before the release leaves
+draft.
+
+### The release (what `Download for macOS` points at)
+
+`docs/index.html` and the README link to
+`https://github.com/gigiheristiawan/timebox/releases/latest`. That URL 404s
+until one non-draft release exists; after that it always redirects to the newest
+one, so the link never needs editing again.
+
+```bash
+# after a notarized, stapled universal build (§2, §3)
+# only after ./scripts/verify-release.sh exits clean, DMG checks included
+gh release create v0.1.0 \
+  src-tauri/target/universal-apple-darwin/release/bundle/dmg/TimeBox_0.1.0_universal.dmg \
+  --title "TimeBox 0.1.0" --draft
+```
+
+The tag must match `version` in **both** `package.json` and
+`src-tauri/tauri.conf.json` — they are the version the app reports, and a
+mismatch means the About box disagrees with the download.
+
+Use `--draft` to stage the assets and publish from the web UI once the download
+has been verified on another Mac; a draft is invisible to `releases/latest`.
+
+### The landing page (GitHub Pages)
+
+Served from the `docs/` folder on `main` — no workflow, no build step, so a
+`git push` publishes it.
+
+```bash
+gh api -X POST repos/gigiheristiawan/timebox/pages \
+  -f 'source[branch]=main' -f 'source[path]=/docs'
+
+# and point the repo header at it
+gh repo edit gigiheristiawan/timebox \
+  --homepage https://gigiheristiawan.github.io/timebox/ \
+  --description "Task rotation timeboxing for macOS. The timer controls how long you work on a task, not whether it's done."
+```
+
+Live at `https://gigiheristiawan.github.io/timebox/`, first build ~1 minute.
+
+Everything the page loads must live **under `docs/`** — the repo root is not the
+site root. The icon it shows is vendored at `docs/assets/icon-256.png` for that
+reason; a path reaching up into `src-tauri/icons/` renders locally and 404s once
+published. Screenshots and the tray marks are already relative and fine.
