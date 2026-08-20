@@ -16,6 +16,7 @@ runbook is now the procedure for the *next* release.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-20 20:55 | **§3 redacted for the public repo:** the App Store Connect Key ID and Issuer ID are replaced by `<key-id>` / `<issuer-id>` placeholders — the Issuer ID is account-wide, not per-project, so it does not belong in a public repository. Real values live in `~/.secrets/` next to the `.p8`. Note that both appear in commits before this one; history was not rewritten. |
 | 2026-08-20 18:10 | §6: `--notes-file docs/release-notes/0.1.0.md` restored to the release command now that the file exists, and the one-file-per-release convention recorded. |
 | 2026-08-20 17:30 | **`tauri build` notarizes the `.app` but not the DMG** — observed on the first Developer ID build: app `Notarized Developer ID` and stapled, DMG `Unnotarized Developer ID` with no ticket. §3 now carries the `notarytool submit` + `stapler staple` step for the container, and verification moved to `scripts/verify-release.sh`, which checks stapling on **both** artifacts. |
 | 2026-08-20 16:45 | **Unblocked:** the Developer ID Application certificate exists — `security find-identity` lists it. Supersedes every "blocked on credentials" line above and the old §3 title *one missing certificate*; §3 now reads as procedure, not a blocker. |
@@ -172,17 +173,18 @@ app-specific password and works unattended in CI.
 export APPLE_SIGNING_IDENTITY="Developer ID Application: Gigih Eristiawan (SQ3B3PDL4S)"
 
 # App Store Connect API key, dedicated to this project — validated 2026-08-20
-export APPLE_API_KEY="747LA9WMKN"
-export APPLE_API_ISSUER="1fe1e803-8130-4fb2-90b5-10746a1a3b3a"
-export APPLE_API_KEY_PATH="$HOME/.secrets/AuthKey_747LA9WMKN_appstoreconnect.p8"
+export APPLE_API_KEY="<key-id>"                  # 10-char Key ID
+export APPLE_API_ISSUER="<issuer-id>"            # account-wide UUID
+export APPLE_API_KEY_PATH="$HOME/.secrets/AuthKey_<key-id>_appstoreconnect.p8"
 
 npm run tauri:build:universal
 ```
 
-The Key ID and Issuer ID above are identifiers, not credentials — they
-authenticate nothing without the `.p8`, which stays outside the repository at
-the path shown (mode `600`, in a `700` directory). Delete these two lines if you
-would rather keep even the identifiers out of version control.
+The real Key ID and Issuer ID are kept **out of this repository** alongside the
+`.p8` itself, in `~/.secrets/` (the `.p8` at mode `600`, in a `700` directory).
+Neither authenticates anything without the key file, but the Issuer ID is
+account-wide rather than per-project, so it stays out of a public repo. The Key
+ID is also the filename of the `.p8`, so `ls ~/.secrets/` recovers it.
 
 Confirm the credentials still authenticate at any time, without needing an app
 to submit:
