@@ -13,6 +13,7 @@ Mac it is quarantined and Gatekeeper refuses it.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-20 14:55 | The whole `src-tauri/icons/` directory is tracked, Windows/Android/iOS output included — §1 previously said to delete it. |
 | 2026-08-20 14:40 | §1: tray icon is now the exported asset `icons/tray.png` loaded by `platform/tray.rs`, no longer drawn in Rust. Export spec recorded. |
 | 2026-08-20 14:10 | §1 rewritten: the icon set is now **exported artwork**, not script output. `icons/generate.py` is no longer the source and must not be re-run — it would overwrite the design. |
 | 2026-08-20 10:45 | Notarization credentials **created and validated** against Apple's notary service — the `Developer`-role key authenticates, so 8.4 needs nothing further. Only the Developer ID certificate remains. |
@@ -47,9 +48,13 @@ npm run tauri icon -- <path-to-master>.png
 
 It writes into `src-tauri/icons/` directly, including the four files
 `tauri.conf.json` references (`32x32.png`, `128x128.png`, `128x128@2x.png`,
-`icon.icns`) plus `icon.png`. The Windows/Android/iOS sizes it also emits are
-unused here and can be deleted. Keep the filenames as they are and no config
+`icon.icns`) plus `icon.png`. Keep the filenames as they are and no config
 change is needed.
+
+It also emits Windows/Android/iOS sizes. This build does not use them, but the
+whole directory is committed anyway: the tool regenerates all of it in one pass,
+so tracking everything keeps `git status` clean after a re-run and means the
+next platform target needs no second export. Commit the full output.
 
 To verify, build a bundle — `npm run tauri:dev` runs unbundled and shows a
 generic Dock icon. A plain `npm run tauri:build` is enough; the universal build
