@@ -12,6 +12,8 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 
 | Date (WIB)       | Change                                                                                                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-20 11:00 | Bundle identifier is `xyz.gigiheristiawan.timebox`; §4.5's data path updated to match. The identifier names the data directory, so the two can never be documented independently. |
+| 2026-08-20 01:20 | **D13 corrected in the body.** It read that Away is "derived from the expiry timestamp"; that is only true of the checkpoint currently open. Once answered, the gap cannot be reconstructed — a *parked* block also carries a past `end_at` though no checkpoint was ever open, and a block extended after expiring reaches the checkpoint more than once. Migration **002** adds `time_blocks.away_ms`, banked at each accepted decision, plus `settings.first_run_done` for D12's one-time panel. Neither changes what the product does; both make Today's Away line true. §4.5 amended. |
 | 2026-08-19 21:05 | §6: recorded *why* quitting does not stop the clock — pausing on quit would let a block be banked, the same loophole D10 closes. Noted the actual-duration cap.                    |
 | 2026-08-19 20:55 | **D14** — quit confirmation while a block is running (Pause & Quit / Quit / Cancel). Two edge cases.                                                                              |
 | 2026-08-19 22:35 | §7.1 corrected — the break example read `◔ BREAK 4:12`; minutes are zero-padded like every other clock in the app, so an unpadded minute would shift the menu bar's width once a minute. Implemented as `◔ BREAK 04:12` in `core::menubar`. |
@@ -71,7 +73,7 @@ These were ambiguous in the handoff and are now fixed:
 | D11 | Switching is surfaced | Each block carries `interruptions: number`, incremented every time it is set down. Today shows `Switched early` = the sum across the day, warning-tinted above 2. This is a sharper signal than counting terminated blocks: it says *this one allocation was picked up and put down four times*. Never blocked — same treatment as extensions. |
 | D14 | Quitting with a block running | Quit shows a confirm: *"A 30-minute block is running. Quitting won't pause it."* with **Pause & Quit** (default) / **Quit** / **Cancel**. It prevents nothing — it makes the cost of a thoughtless quit visible, the same treatment extensions and switching get. Not shown when `IDLE`, `PAUSED`, or at a checkpoint (quitting there is already safe: the checkpoint is restored). |
 | D12 | First-run discoverability | `LSUIElement` leaves no Dock icon and no Cmd-Tab entry, and menu bar items can be hidden entirely by the notch. Two mitigations: relaunching an already-running instance **opens the popover** rather than silently focusing nothing, and a one-time first-run panel points at the menu bar. Without the first, a second double-click reads as a broken app. |
-| D13 | Time at an unanswered checkpoint | The clock stops at `AWAITING_DECISION`, so time between expiry and the decision is neither work nor break. It is **surfaced, never guessed at**: the checkpoint shows `This block ended 2h 14m ago` once the gap exceeds 2 minutes, and Today carries an `Away` line. Derived from the expiry timestamp — no idle detection, and no retroactive crediting of the gap to any task. |
+| D13 | Time at an unanswered checkpoint | The clock stops at `AWAITING_DECISION`, so time between expiry and the decision is neither work nor break. It is **surfaced, never guessed at**: the checkpoint shows `This block ended 2h 14m ago` once the gap exceeds 2 minutes, and Today carries an `Away` line. The open checkpoint's gap is derived live from the expiry timestamp; each answered one is banked on the block (`away_ms`) because it cannot be reconstructed afterwards. Either way there is no idle detection, and no retroactive crediting of the gap to any task. |
 | D7 | Break as a checkpoint option | A break is a **time block with no task** (`kind: 'BREAK'`). **Break is a modifier on the task decision, not a substitute for it.** Both task decisions can be followed by a break, as single compound actions: `Complete & Break` and `Keep Pending & Break`. Break duration is selected *before* the action (a segmented control defaulting to `defaultBreakDurationSeconds`) so every compound action stays one click. |
 | D8 | End of a break | A break expiring re-enters `AWAITING_DECISION` with a break-specific checkpoint (`Start <next task>` / `Extend Break`). It never auto-starts the next task — the user may be away from the desk. |
 | D9 | Break accounting | Break time is excluded from "worked" totals and from per-task time. It is reported separately as `On break`. Breaks do **not** consume `availableWorkMinutesPerDay` in the capacity strip — capacity measures *work* the day can hold, and rest is not work. Confirmed 2026-08-19. |
@@ -173,9 +175,11 @@ interface Settings {
 ### 4.5 Persistence
 
 SQLite via `tauri-plugin-sql` (bundled SQLite, no external dependency), stored at
-`~/Library/Application Support/com.timebox.app/timebox.db`.
+`~/Library/Application Support/xyz.gigiheristiawan.timebox/timebox.db`.
 
 Tables: `tasks`, `time_blocks`, `app_state` (single row, id=1), `settings` (single row, id=1), `schema_migrations`.
+
+Durations and instants are stored in **milliseconds**, matching the domain core exactly; second-granularity columns would force a lossy conversion on every save and accumulate the rounding as real drift across pause/resume cycles. The `…Seconds` field names in §4.4 and §4.1 name the concept, not the column.
 
 Requirements:
 - All writes are synchronous and committed before the corresponding UI transition is acknowledged.
