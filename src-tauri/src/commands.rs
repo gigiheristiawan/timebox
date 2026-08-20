@@ -1,7 +1,9 @@
-use crate::core::model::{Millis, Priority};
+use crate::core::model::{Millis, Priority, TimerState};
+use crate::core::summary::{summarize, Summary};
 use crate::core::timer_machine::{Event, MachineState};
+use crate::db::settings::Settings;
 use crate::error::AppResult;
-use crate::state::{now_ms, App};
+use crate::state::{day_start_ms, now_ms, App};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::State;
@@ -16,14 +18,24 @@ pub struct Snapshot {
     pub now: Millis,
     pub remaining_ms: Millis,
     pub staleness_ms: Option<Millis>,
+    /// Today's numbers and the capacity strip, computed by `core::summary`.
+    /// Carried on the snapshot so the UI has one source of truth and no
+    /// arithmetic of its own (SPEC R7).
+    pub summary: Summary,
+    /// Settings ride along for the same reason: one channel, no second store
+    /// for the UI to keep in sync.
+    pub settings: Settings,
 }
 
 fn snapshot_of(app: &App) -> Snapshot {
     let now = now_ms();
     let state = app.snapshot();
+    let settings = app.settings();
     Snapshot {
         remaining_ms: state.remaining_ms(now),
         staleness_ms: state.staleness_ms(now),
+        summary: summarize(&state, day_start_ms(now), now, settings.available_work_ms_per_day),
+        settings,
         state,
         now,
     }
@@ -90,7 +102,7 @@ pub fn dispatch(
     action: Action,
 ) -> AppResult<Snapshot> {
     let fx = app.dispatch(action.into(), now_ms())?;
-    crate::platform::checkpoint::apply(&handle, &fx);
+    crate::platform::checkpoint::apply(&handle, &fx, &app.settings());
     crate::platform::tray::refresh(&handle, &app.snapshot(), now_ms());
     let _ = tauri::Emitter::emit(&handle, "timebox://changed", ());
     Ok(snapshot_of(&app))
@@ -111,6 +123,38 @@ pub fn health_check(app: State<'_, Arc<App>>) -> AppResult<HealthReport> {
         schema_version: app.db.schema_version()?,
         journal_mode: app.db.journal_mode()?,
     })
+}
+
+// ------------------------------------------------------------------ settings
+
+/// Writing settings can change three things outside the database — the menu bar
+/// title, the login item, and the theme every window paints — so they are all
+/// applied here rather than left for a caller to remember.
+#[tauri::command]
+pub fn update_settings(
+    app: State<'_, Arc<App>>,
+    handle: tauri::AppHandle,
+    settings: Settings,
+) -> AppResult<Snapshot> {
+    let stored = app.set_settings(&settings)?;
+
+    crate::platform::tray::set_show_timer(stored.menu_bar_show_timer);
+    crate::platform::tray::refresh_forced(&handle, &app.snapshot(), now_ms());
+    apply_launch_at_login(&handle, stored.launch_at_login);
+
+    let _ = tauri::Emitter::emit(&handle, "timebox://changed", ());
+    Ok(snapshot_of(&app))
+}
+
+/// Best-effort: a login item that cannot be registered must not fail the save.
+/// The switch reflects the stored preference; a failure is logged, not hidden.
+fn apply_launch_at_login(handle: &tauri::AppHandle, on: bool) {
+    use tauri_plugin_autostart::ManagerExt;
+    let mgr = handle.autolaunch();
+    let result = if on { mgr.enable() } else { mgr.disable() };
+    if let Err(e) = result {
+        eprintln!("[timebox] launch at login could not be {}: {e}", if on { "enabled" } else { "disabled" });
+    }
 }
 
 // --------------------------------------------------------- window plumbing
@@ -141,15 +185,62 @@ pub fn open_main_window(handle: tauri::AppHandle) -> Result<(), String> {
     window.set_focus().map_err(|e| e.to_string())
 }
 
+/// Settings is its own window rather than a panel in the main one, matching
+/// the prototype and keeping `Cmd+,` meaningful from the popover too.
+#[tauri::command]
+pub fn open_settings_window(handle: tauri::AppHandle) -> Result<(), String> {
+    crate::platform::popover::hide(&handle);
+    let window = match tauri::Manager::get_webview_window(&handle, "settings") {
+        Some(w) => w,
+        None => tauri::WebviewWindowBuilder::new(
+            &handle,
+            "settings",
+            tauri::WebviewUrl::App("index.html".into()),
+        )
+        .title("Settings")
+        .inner_size(376.0, 460.0)
+        .resizable(false)
+        .maximizable(false)
+        .build()
+        .map_err(|e| e.to_string())?,
+    };
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn close_popover(handle: tauri::AppHandle) {
     crate::platform::popover::hide(&handle);
 }
 
-/// D14's "quit while a block is running" confirmation is task 7.11; until then
-/// this quits directly. `end_at` is absolute, so quitting does not lose the
-/// block — hydrate resolves it on the next launch.
+/// Quitting is never blocked — the confirm exists to make the cost visible, not
+/// to prevent it (SPEC D14). `end_at` is absolute, so a plain quit keeps the
+/// block running; hydrate resolves it on the next launch.
+///
+/// From IDLE, PAUSED, or a checkpoint there is nothing to warn about: the first
+/// two hold no live allocation and a checkpoint is restored intact.
 #[tauri::command]
-pub fn quit_app(handle: tauri::AppHandle) {
+pub fn request_quit(app: State<'_, Arc<App>>, handle: tauri::AppHandle) {
+    if app.snapshot().timer_state == TimerState::Running {
+        crate::platform::quit_confirm::show(&handle);
+    } else {
+        handle.exit(0);
+    }
+}
+
+/// The answer to that confirm. `pause` holds the remainder first, which is the
+/// only way to stop the clock consuming the block while the app is closed.
+#[tauri::command]
+pub fn confirm_quit(app: State<'_, Arc<App>>, handle: tauri::AppHandle, pause: bool) {
+    if pause {
+        if let Err(e) = app.dispatch(Event::Pause, now_ms()) {
+            eprintln!("[timebox] could not pause before quitting: {e}");
+        }
+    }
     handle.exit(0);
+}
+
+#[tauri::command]
+pub fn cancel_quit(handle: tauri::AppHandle) {
+    crate::platform::quit_confirm::hide(&handle);
 }

@@ -134,6 +134,12 @@ pub struct TimeBlock {
     pub remaining_when_paused_ms: Option<Millis>,
     pub accumulated_active_ms: Millis,
     pub last_resume_at: Option<Millis>,
+    /// Time this block spent at an unanswered checkpoint, banked each time the
+    /// checkpoint is answered (SPEC D13). Not derivable after the fact: a
+    /// parked block also carries a past `end_at`, and an extended block can
+    /// reach the checkpoint more than once. The *open* checkpoint's gap is
+    /// still live — see `MachineState::staleness_ms`.
+    pub away_ms: Millis,
 }
 
 impl TimeBlock {

@@ -491,3 +491,161 @@ fn reordering_moves_a_task_before_another() {
     let s = fire(s, Event::Reorder { moved: "Z".into(), before: "B".into() }, 0, &mut ids);
     assert_eq!(s.queue, vec!["A", "D", "B", "C"]);
 }
+
+// ------------------------------------------- Phase 7: away time and summary
+//
+// Test 22 in SPEC §12 and D13. The point of these is that a gap at an
+// unanswered checkpoint is *surfaced*, never guessed at and never quietly
+// credited to a task as work.
+
+#[test]
+fn time_at_an_unanswered_checkpoint_is_away_and_not_worked() {
+    let (s, mut ids) = start_a(0);
+    // The block expires at 30m; the decision comes two hours later.
+    let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+    assert_eq!(s.timer_state, TimerState::AwaitingDecision);
+    assert_eq!(s.staleness_ms(150 * MIN), Some(120 * MIN));
+
+    let s = fire(s, Event::DecidePending, 150 * MIN, &mut ids);
+    let a = blocks_for(&s, "A")[0];
+    assert_eq!(a.away_ms, 120 * MIN, "the gap is banked on the block");
+    assert_eq!(
+        a.actual_ms,
+        Some(30 * MIN),
+        "the two hours away are not worked time — the block is capped at its allocation"
+    );
+}
+
+#[test]
+fn extending_after_a_gap_keeps_both_gaps() {
+    // Extending re-arms the block, so it can reach the checkpoint more than
+    // once. Assigning rather than accumulating would silently lose the first
+    // wait, and Today's Away line would understate the day.
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+    let s = fire(s, Event::DecideExtend { ms: 10 * MIN }, 40 * MIN, &mut ids); // 10m away
+    let s = fire(s, Event::Tick, 50 * MIN, &mut ids);
+    let s = fire(s, Event::DecidePending, 55 * MIN, &mut ids); // 5m more
+
+    assert_eq!(blocks_for(&s, "A")[0].away_ms, 15 * MIN);
+}
+
+#[test]
+fn a_parked_block_accrues_no_away_time() {
+    // A parked block keeps a past `end_at`, so deriving Away from timestamps
+    // after the fact would count every set-down task as time spent waiting at
+    // a checkpoint that was never open.
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::SwitchTo { task: "B".into() }, 10 * MIN, &mut ids);
+    let s = fire(s, Event::Tick, 300 * MIN, &mut ids);
+
+    assert_eq!(blocks_for(&s, "A")[0].away_ms, 0);
+}
+
+#[test]
+fn a_rejected_event_at_a_checkpoint_banks_nothing() {
+    // SwitchTo is refused at a work checkpoint. If it banked the gap anyway,
+    // the wait would be counted twice once the real decision arrived.
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+    let s = fire(s, Event::SwitchTo { task: "B".into() }, 60 * MIN, &mut ids);
+    assert_eq!(s.timer_state, TimerState::AwaitingDecision);
+    assert_eq!(blocks_for(&s, "A")[0].away_ms, 0);
+
+    let s = fire(s, Event::DecidePending, 90 * MIN, &mut ids);
+    assert_eq!(blocks_for(&s, "A")[0].away_ms, 60 * MIN, "counted once, not twice");
+}
+
+mod summary {
+    use super::*;
+    use crate::core::summary::summarize;
+
+    const DAY: Millis = 0;
+    const AVAILABLE: Millis = 420 * MIN;
+
+    #[test]
+    fn a_break_is_rest_and_never_counts_as_worked() {
+        // The invariant the whole product rests on: break time is not output,
+        // and it does not consume the day's work capacity (SPEC D7).
+        let (s, mut ids) = start_a(0);
+        let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+        let s = fire(s, Event::DecideBreak { ms: 10 * MIN, complete: true }, 30 * MIN, &mut ids);
+
+        let sum = summarize(&s, DAY, 35 * MIN, AVAILABLE);
+        assert_eq!(sum.today.worked_ms, 30 * MIN);
+        assert_eq!(sum.today.break_ms, 5 * MIN, "the running break counts only what it has spent");
+        assert_eq!(sum.today.tasks_completed, 1);
+        assert!(
+            !sum.today.top.iter().any(|t| t.title == "Break"),
+            "a break has no task and cannot appear in the top list"
+        );
+    }
+
+    #[test]
+    fn switching_early_is_counted_so_the_day_shows_its_own_churn() {
+        let (s, mut ids) = start_a(0);
+        let s = fire(s, Event::SwitchTo { task: "B".into() }, 10 * MIN, &mut ids);
+        let s = fire(s, Event::SwitchTo { task: "C".into() }, 20 * MIN, &mut ids);
+
+        assert_eq!(summarize(&s, DAY, 25 * MIN, AVAILABLE).today.switched_early, 2);
+    }
+
+    #[test]
+    fn capacity_counts_a_parked_task_at_its_remainder() {
+        // Otherwise the strip would promise time the task no longer has, and
+        // the day would look emptier than it is (SPEC D10).
+        let (s, mut ids) = start_a(0);
+        let s = fire(s, Event::SwitchTo { task: "B".into() }, 10 * MIN, &mut ids);
+
+        // Queue is now B(45, running) A(20 parked) C(30) D(45).
+        let cap = summarize(&s, DAY, 10 * MIN, AVAILABLE).capacity;
+        assert_eq!(cap.allocated_ms, (45 + 20 + 30 + 45) * MIN);
+        assert!(!cap.over);
+        assert_eq!(cap.unallocated_ms, AVAILABLE - cap.allocated_ms);
+    }
+
+    #[test]
+    fn over_capacity_is_reported_but_never_blocked() {
+        let (s, _ids) = day(); // 150m queued
+        let cap = summarize(&s, DAY, 0, 60 * MIN).capacity;
+        assert!(cap.over);
+        assert_eq!(cap.unallocated_ms, -90 * MIN, "the overrun is signed, not clamped");
+    }
+
+    #[test]
+    fn only_todays_blocks_are_counted() {
+        // The app is long-running; without the day boundary Today would be
+        // "since install".
+        let (s, mut ids) = start_a(0);
+        let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+        let s = fire(s, Event::DecidePending, 30 * MIN, &mut ids);
+
+        let tomorrow = 24 * 60 * MIN;
+        assert_eq!(summarize(&s, tomorrow, tomorrow, AVAILABLE).today.worked_ms, 0);
+        assert_eq!(summarize(&s, DAY, 30 * MIN, AVAILABLE).today.worked_ms, 30 * MIN);
+    }
+
+    #[test]
+    fn away_includes_the_checkpoint_still_open() {
+        // A gap only becomes visible once it is answered unless the open one is
+        // added live — which is exactly the case D13 is about.
+        let (s, mut ids) = start_a(0);
+        let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+
+        assert_eq!(summarize(&s, DAY, 90 * MIN, AVAILABLE).today.away_ms, 60 * MIN);
+    }
+
+    #[test]
+    fn the_top_list_ranks_by_time_and_stops_at_three() {
+        let (s, mut ids) = day();
+        let mut s = s;
+        for (task, at) in [("A", 0), ("B", 30 * MIN), ("C", 40 * MIN), ("D", 45 * MIN)] {
+            s = fire(s, Event::SwitchTo { task: task.into() }, at, &mut ids);
+        }
+        let top = summarize(&s, DAY, 50 * MIN, AVAILABLE).today.top;
+        assert_eq!(top.len(), 3);
+        assert_eq!(top[0].ms, 30 * MIN); // A
+        assert_eq!(top[1].ms, 10 * MIN); // B
+        assert!(top[0].ms >= top[1].ms && top[1].ms >= top[2].ms);
+    }
+}

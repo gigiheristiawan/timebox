@@ -9,11 +9,18 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial_schema",
-    sql: include_str!("migrations/001_initial_schema.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial_schema",
+        sql: include_str!("migrations/001_initial_schema.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "away_and_first_run",
+        sql: include_str!("migrations/002_away_and_first_run.sql"),
+    },
+];
 
 pub fn run(conn: &mut Connection) -> crate::error::AppResult<()> {
     conn.execute_batch(
@@ -68,6 +75,51 @@ mod tests {
             .unwrap();
         assert_eq!(first, MIGRATIONS.len() as i64);
         assert_eq!(count, MIGRATIONS.len() as i64, "migrations must not re-apply");
+    }
+
+    #[test]
+    fn a_database_already_at_version_1_upgrades_without_losing_rows() {
+        // The shipped database is at version 1. An upgrade that dropped or
+        // rewrote rows would lose a real day's work, so this walks the actual
+        // path a user's file takes rather than only the fresh-install one.
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)")
+            .unwrap();
+        conn.execute_batch(MIGRATIONS[0].sql).unwrap();
+        conn.execute(
+            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (1, 'initial_schema', '')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, title, status, block_duration_ms, created_at)
+             VALUES ('t1', 'yesterday', 'IN_PROGRESS', 1800000, 0)",
+            [],
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let version: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64);
+
+        let title: String = conn
+            .query_row("SELECT title FROM tasks WHERE id = 't1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title, "yesterday", "existing rows must survive the upgrade");
+
+        // The new columns must be usable, and default for pre-existing rows.
+        let away: i64 = conn
+            .query_row("SELECT COALESCE(SUM(away_ms), 0) FROM time_blocks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(away, 0);
+        let first_run: i64 = conn
+            .query_row("SELECT first_run_done FROM settings WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(first_run, 0, "an existing install has not seen the panel either");
     }
 
     #[test]

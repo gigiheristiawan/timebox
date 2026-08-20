@@ -4,12 +4,16 @@ import { useTimebox } from "../stores/useTimebox";
 import type { Priority } from "../ipc/types";
 
 export function AddTask() {
-  const send = useTimebox((s) => s.send);
+  const { snap, send } = useTimebox();
   const [title, setTitle] = useState("");
-  const [minutes, setMinutes] = useState(30);
+  // `null` follows the configured default; picking a value pins it for the
+  // rest of the session, so a one-off 45m task does not change the setting.
+  const [chosen, setChosen] = useState<number | null>(null);
   const [priority, setPriority] = useState<Priority>("Medium");
   const [touched, setTouched] = useState(false);
 
+  const defaultMinutes = Math.round((snap?.settings.defaultBlockDurationMs ?? 30 * MIN) / MIN);
+  const minutes = chosen ?? defaultMinutes;
   const invalid = touched && title.trim() === "";
 
   const submit = (e: React.FormEvent) => {
@@ -38,14 +42,15 @@ export function AddTask() {
       </div>
       <select
         value={minutes}
-        onChange={(e) => setMinutes(Number(e.target.value))}
+        onChange={(e) => setChosen(Number(e.target.value))}
         aria-label="Block duration"
         className="field"
       >
-        {/* TEMPORARY: 1-minute blocks make the expiration checkpoint testable
-            without waiting. Remove before release — tracked as Phase 8 cleanup. */}
-        <option value={1}>1 min (test)</option>
-        {[15, 25, 30, 45, 60].map((m) => <option key={m} value={m}>{m} min</option>)}
+        {/* The configured default may sit outside this list; showing it keeps
+            the select from silently changing the duration on first render. */}
+        {Array.from(new Set([15, 25, 30, 45, 60, defaultMinutes]))
+          .sort((a, b) => a - b)
+          .map((m) => <option key={m} value={m}>{m} min</option>)}
       </select>
       <select
         value={priority}

@@ -6,6 +6,7 @@
 
 use crate::core::model::BlockKind;
 use crate::core::timer_machine::Effect;
+use crate::db::settings::Settings;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
 
@@ -13,7 +14,9 @@ pub const LABEL: &str = "checkpoint";
 
 /// Apply the effects a transition produced. Called from both the tick loop and
 /// the command surface so a checkpoint reached by either path behaves the same.
-pub fn apply(app: &AppHandle, fx: &[Effect]) {
+/// Settings gate the *announcement* only. The window itself is not optional —
+/// no setting makes an expired block resolve without a decision (SPEC §7.4).
+pub fn apply(app: &AppHandle, fx: &[Effect], settings: &Settings) {
     for e in fx {
         match e {
             Effect::EnterCheckpoint { .. } => {
@@ -22,8 +25,10 @@ pub fn apply(app: &AppHandle, fx: &[Effect]) {
                 }
             }
             Effect::LeaveCheckpoint => hide(app),
-            Effect::PlayExpirySound => play_sound(),
-            Effect::Notify { kind, task_title, allocated_minutes } => {
+            Effect::PlayExpirySound if settings.expiration_sound => play_sound(),
+            Effect::Notify { kind, task_title, allocated_minutes }
+                if settings.system_notification =>
+            {
                 notify(app, *kind, task_title.as_deref(), *allocated_minutes)
             }
             _ => {}

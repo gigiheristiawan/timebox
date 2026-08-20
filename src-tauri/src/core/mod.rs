@@ -6,6 +6,7 @@
 pub mod menubar;
 pub mod model;
 pub mod queue;
+pub mod summary;
 pub mod timer_machine;
 
 #[cfg(test)]

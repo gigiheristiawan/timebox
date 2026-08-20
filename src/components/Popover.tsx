@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { clockStr, durStr } from "../core/format";
-import { openMainWindow, quitApp } from "../ipc/commands";
+import { openMainWindow, openSettingsWindow, requestQuit } from "../ipc/commands";
 import { currentBlock, currentTask, isBreak, parkedFor, taskById, useTimebox } from "../stores/useTimebox";
 import { Countdown } from "./Countdown";
 
@@ -140,7 +140,8 @@ export function Popover() {
       {/* Menu ------------------------------------------------------------ */}
       <nav className="border-t border-line py-1.5">
         <MenuItem onClick={() => void openMainWindow()}>Open App</MenuItem>
-        <MenuItem onClick={() => void quitApp()}>Quit TimeBox</MenuItem>
+        <MenuItem onClick={() => void openSettingsWindow()}>Settings…</MenuItem>
+        <MenuItem onClick={() => void requestQuit()}>Quit TimeBox</MenuItem>
       </nav>
     </div>
   );

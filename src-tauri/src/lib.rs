@@ -32,12 +32,12 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let db = Db::open(&dir)?;
-            platform::tray::set_show_timer(db.menu_bar_show_timer()?);
 
             // Expiry is resolved here, before any window can render. A block
             // that ended while the app was closed or the Mac was asleep must
             // appear as a checkpoint, never as a running or reset timer.
             let state = state::App::hydrate(db, state::now_ms())?;
+            platform::tray::set_show_timer(state.settings().menu_bar_show_timer);
 
             platform::tray::init(app.handle())?;
             platform::tray::refresh(app.handle(), &state.snapshot(), state::now_ms());
@@ -70,7 +70,7 @@ pub fn run() {
             let ticker_handle = handle.clone();
             let app_state = state.clone();
             state.start_ticking(move |fx| {
-                platform::checkpoint::apply(&ticker_handle, fx);
+                platform::checkpoint::apply(&ticker_handle, fx, &app_state.settings());
                 platform::tray::refresh(&ticker_handle, &app_state.snapshot(), state::now_ms());
                 let _ = ticker_handle.emit("timebox://changed", ());
             });
@@ -88,10 +88,30 @@ pub fn run() {
             commands::health_check,
             commands::get_snapshot,
             commands::dispatch,
+            commands::update_settings,
             commands::open_main_window,
+            commands::open_settings_window,
             commands::close_popover,
-            commands::quit_app
+            commands::request_quit,
+            commands::confirm_quit,
+            commands::cancel_quit
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running TimeBox");
+        .build(tauri::generate_context!())
+        .expect("error while building TimeBox")
+        // Cmd+Q reaches the app as an exit request rather than a command, so
+        // D14's confirmation has to be hooked here as well as on the popover's
+        // Quit item. `handle.exit(0)` carries a code, which is how an answered
+        // confirm gets through without re-asking.
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, code: None, .. } = &event {
+                let running = app
+                    .try_state::<std::sync::Arc<state::App>>()
+                    .map(|s| s.snapshot().timer_state == core::model::TimerState::Running)
+                    .unwrap_or(false);
+                if running {
+                    api.prevent_exit();
+                    platform::quit_confirm::show(app);
+                }
+            }
+        });
 }

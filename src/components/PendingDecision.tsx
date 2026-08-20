@@ -1,5 +1,5 @@
 import { durStr } from "../core/format";
-import { useTimebox, currentBlock, currentTask, isBreak, taskById } from "../stores/useTimebox";
+import { useTimebox, breakDefaultMs, currentBlock, currentTask, isBreak, taskById } from "../stores/useTimebox";
 import { Button, SectionLabel } from "./ui";
 
 /**
@@ -8,9 +8,12 @@ import { Button, SectionLabel } from "./ui";
  * renders the same decisions inline so the app is usable end to end in the
  * meantime; the actions themselves are already the real ones.
  */
-export function PendingDecision({ breakMinutes }: { breakMinutes: number }) {
+export function PendingDecision() {
   const { snap, send } = useTimebox();
   if (!snap || snap.state.timerState !== "AwaitingDecision") return null;
+
+  const breakMs = breakDefaultMs(snap);
+  const breakMinutes = Math.round(breakMs / 60_000);
 
   const block = currentBlock(snap);
   const stale = snap.stalenessMs ?? 0;
@@ -71,13 +74,13 @@ export function PendingDecision({ breakMinutes }: { breakMinutes: number }) {
 
         <span className="whitespace-nowrap pr-2 text-sm font-semibold">✓ Complete</span>
         <Button onClick={() => send({ kind: "decideComplete" })} hint="1">Start Next</Button>
-        <Button onClick={() => send({ kind: "decideBreak", ms: breakMinutes * 60_000, complete: true })} hint="2">
+        <Button onClick={() => send({ kind: "decideBreak", ms: breakMs, complete: true })} hint="2">
           Break {breakMinutes}m
         </Button>
 
         <span className="whitespace-nowrap pr-2 text-sm font-semibold">→ Keep pending</span>
         <Button variant="primary" onClick={() => send({ kind: "decidePending" })} hint="3 · ⏎">Start Next</Button>
-        <Button onClick={() => send({ kind: "decideBreak", ms: breakMinutes * 60_000, complete: false })} hint="4">
+        <Button onClick={() => send({ kind: "decideBreak", ms: breakMs, complete: false })} hint="4">
           Break {breakMinutes}m
         </Button>
       </div>

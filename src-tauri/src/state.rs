@@ -5,7 +5,8 @@
 
 use crate::core::model::*;
 use crate::core::timer_machine::{reduce, Effect, Event, MachineState};
-use crate::db::{repo, Db};
+use crate::db::settings::Settings;
+use crate::db::{repo, settings, Db};
 use crate::error::AppResult;
 use parking_lot::{Condvar, Mutex};
 use std::sync::Arc;
@@ -16,6 +17,23 @@ pub fn now_ms() -> Millis {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as Millis)
         .unwrap_or(0)
+}
+
+/// Local midnight preceding `now`. The boundary for everything Today counts.
+///
+/// A timezone is a shell concern — the domain core takes the boundary as an
+/// argument so its arithmetic stays pure and testable (see `core::summary`).
+pub fn day_start_ms(now: Millis) -> Millis {
+    use chrono::{Local, TimeZone};
+    Local
+        .timestamp_millis_opt(now)
+        .single()
+        .and_then(|dt| dt.date_naive().and_hms_opt(0, 0, 0))
+        .and_then(|midnight| Local.from_local_datetime(&midnight).earliest())
+        .map(|dt| dt.timestamp_millis())
+        // A DST spring-forward can leave local midnight nonexistent. Falling
+        // back to a UTC-day boundary keeps Today counting rather than empty.
+        .unwrap_or(now - now.rem_euclid(86_400_000))
 }
 
 struct UuidIds;
@@ -29,6 +47,9 @@ impl IdSource for UuidIds {
 pub struct App {
     pub db: Db,
     machine: Mutex<MachineState>,
+    /// Cached so the tick loop and every checkpoint effect can read settings
+    /// without touching the database once a second.
+    settings: Mutex<Settings>,
     ids: Mutex<UuidIds>,
     ticker: Ticker,
 }
@@ -43,6 +64,7 @@ impl App {
     /// case needing its own code path.
     pub fn hydrate(db: Db, now: Millis) -> AppResult<Arc<Self>> {
         let loaded = db.with(repo::load)?;
+        let settings = db.with(settings::load)?;
         let mut ids = UuidIds;
         let (state, _fx) = reduce(loaded, Event::Tick, now, &mut ids);
         db.with_mut(|c| repo::save(c, &state, now))?;
@@ -51,6 +73,7 @@ impl App {
         let app = Arc::new(Self {
             db,
             machine: Mutex::new(state),
+            settings: Mutex::new(settings),
             ids: Mutex::new(UuidIds),
             ticker: Ticker::new(),
         });
@@ -60,6 +83,19 @@ impl App {
 
     pub fn snapshot(&self) -> MachineState {
         self.machine.lock().clone()
+    }
+
+    pub fn settings(&self) -> Settings {
+        *self.settings.lock()
+    }
+
+    /// Persist first, then cache — the same ordering as `dispatch`, so a failed
+    /// write can never leave the app running on settings the database rejected.
+    /// Returns the stored values, which may be clamped.
+    pub fn set_settings(&self, next: &Settings) -> AppResult<Settings> {
+        let stored = self.db.with(|c| settings::save(c, next))?;
+        *self.settings.lock() = stored;
+        Ok(stored)
     }
 
     /// Reduce, persist, and apply the ticking effects — in that order, so a

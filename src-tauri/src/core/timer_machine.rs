@@ -189,6 +189,7 @@ pub fn reduce(
 
         Event::DecideComplete => {
             if at_work_checkpoint(&state) {
+                settle_away(&mut state, now);
                 let t = state.current_task().map(|t| t.id.clone());
                 end_current(&mut state, BlockStatus::Completed, now);
                 if let Some(t) = t {
@@ -201,6 +202,7 @@ pub fn reduce(
 
         Event::DecidePending => {
             if at_work_checkpoint(&state) {
+                settle_away(&mut state, now);
                 let t = state.current_task().map(|t| t.id.clone());
                 end_current(&mut state, BlockStatus::Completed, now);
                 if let Some(t) = t {
@@ -213,6 +215,7 @@ pub fn reduce(
 
         Event::DecideExtend { ms } => {
             if at_work_checkpoint(&state) && ms > 0 {
+                settle_away(&mut state, now);
                 if let Some(id) = state.current_block_id.clone() {
                     if let Some(b) = state.block_mut(&id) {
                         b.extension_ms += ms;
@@ -229,6 +232,7 @@ pub fn reduce(
 
         Event::DecideBreak { ms, complete } => {
             if at_work_checkpoint(&state) && ms > 0 {
+                settle_away(&mut state, now);
                 let t = state.current_task().map(|t| t.id.clone());
                 end_current(&mut state, BlockStatus::Completed, now);
                 if let Some(t) = t {
@@ -245,6 +249,7 @@ pub fn reduce(
 
         Event::EndBreak => {
             if at_break_checkpoint(&state) || state.on_break() {
+                settle_away(&mut state, now);
                 end_current(&mut state, BlockStatus::Completed, now);
                 fx.push(Effect::LeaveCheckpoint);
                 start_next(&mut state, now, ids, &mut fx);
@@ -253,6 +258,7 @@ pub fn reduce(
 
         Event::ExtendBreak { ms } => {
             if state.on_break() && ms > 0 {
+                settle_away(&mut state, now);
                 if let Some(id) = state.current_block_id.clone() {
                     if let Some(b) = state.block_mut(&id) {
                         b.extension_ms += ms;
@@ -306,6 +312,7 @@ pub fn reduce(
                 .and_then(|b| b.task_id.clone())
                 .is_some_and(|t| t == task);
             if was_current {
+                settle_away(&mut state, now);
                 end_current(&mut state, BlockStatus::Cancelled, now);
                 start_next(&mut state, now, ids, &mut fx);
             }
@@ -325,6 +332,22 @@ fn at_work_checkpoint(s: &MachineState) -> bool {
 
 fn at_break_checkpoint(s: &MachineState) -> bool {
     s.timer_state == TimerState::AwaitingDecision && s.on_break()
+}
+
+/// Bank the time the current block spent waiting for an answer (SPEC D13).
+///
+/// Called from every path that answers a checkpoint, and only from those — a
+/// rejected event must not bank a gap that is still running. Extending re-arms
+/// the block, so this accumulates rather than assigns.
+fn settle_away(state: &mut MachineState, now: Millis) {
+    if state.timer_state != TimerState::AwaitingDecision {
+        return;
+    }
+    let Some(id) = state.current_block_id.clone() else { return };
+    if let Some(b) = state.block_mut(&id) {
+        let expired_at = b.end_at.unwrap_or(now);
+        b.away_ms += (now - expired_at).max(0);
+    }
 }
 
 /// Hold a block's remainder. Used by both `Pause` and by parking on a switch —
@@ -411,6 +434,7 @@ fn start_break(
         accumulated_active_ms: 0,
         last_resume_at: Some(now),
         paused_at: None,
+        away_ms: 0,
     };
     state.current_block_id = Some(b.id.clone());
     state.blocks.push(b);
@@ -495,6 +519,7 @@ fn start_task(
         accumulated_active_ms: 0,
         last_resume_at: Some(now),
         paused_at: None,
+        away_ms: 0,
     };
     state.current_block_id = Some(b.id.clone());
     state.blocks.push(b);
@@ -520,6 +545,7 @@ fn switch_to(
     if let Some(b) = state.current_block().cloned() {
         if b.kind == BlockKind::Break {
             // Cutting a break short is not an interruption of work.
+            settle_away(state, now);
             end_current(state, BlockStatus::Completed, now);
             fx.push(Effect::LeaveCheckpoint);
         } else {

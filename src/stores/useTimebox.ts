@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
-import { dispatch as ipcDispatch, getSnapshot } from "../ipc/commands";
-import type { Action, Snapshot, Task, TimeBlock } from "../ipc/types";
+import { dispatch as ipcDispatch, getSnapshot, updateSettings } from "../ipc/commands";
+import type { Action, Settings, Snapshot, Task, TimeBlock } from "../ipc/types";
+import { applyTheme } from "../theme";
 
 interface Store {
   snap: Snapshot | null;
@@ -11,6 +12,8 @@ interface Store {
   clockSkew: number;
   refresh: () => Promise<void>;
   send: (action: Action) => Promise<void>;
+  /** Written whole; the stored result comes back, which may be clamped. */
+  saveSettings: (settings: Settings) => Promise<void>;
   init: () => Promise<() => void>;
 }
 
@@ -22,6 +25,7 @@ export const useTimebox = create<Store>((set, get) => ({
   refresh: async () => {
     try {
       const snap = await getSnapshot();
+      applyTheme(snap.settings.theme);
       set({ snap, clockSkew: snap.now - Date.now(), error: null });
     } catch (e) {
       set({ error: String(e) });
@@ -31,6 +35,16 @@ export const useTimebox = create<Store>((set, get) => ({
   send: async (action) => {
     try {
       const snap = await ipcDispatch(action);
+      set({ snap, clockSkew: snap.now - Date.now(), error: null });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  saveSettings: async (settings) => {
+    try {
+      const snap = await updateSettings(settings);
+      applyTheme(snap.settings.theme);
       set({ snap, clockSkew: snap.now - Date.now(), error: null });
     } catch (e) {
       set({ error: String(e) });
@@ -86,4 +100,11 @@ export function queuedMs(s: Snapshot | null, taskId: string): number {
 
 export function isBreak(s: Snapshot | null): boolean {
   return currentBlock(s)?.kind === "Break";
+}
+
+/** Defaults for a surface that renders before the first snapshot arrives. */
+export const FALLBACK_BREAK_MS = 10 * 60_000;
+
+export function breakDefaultMs(s: Snapshot | null): number {
+  return s?.settings.defaultBreakDurationMs ?? FALLBACK_BREAK_MS;
 }

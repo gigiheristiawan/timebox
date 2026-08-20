@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { durStr } from "../core/format";
-import { useTimebox, currentBlock, currentTask, isBreak, taskById } from "../stores/useTimebox";
+import { useTimebox, breakDefaultMs, currentBlock, currentTask, isBreak, taskById } from "../stores/useTimebox";
 
-const DEFAULT_BREAK_MIN = 10; // From settings in Phase 7.
 const STALENESS_FLOOR_MS = 120_000;
 
 /**
@@ -19,11 +18,17 @@ export function Checkpoint() {
     return () => un?.();
   }, [init]);
 
-  const [breakMin, setBreakMin] = useState(DEFAULT_BREAK_MIN);
+  // `null` means "follow the setting". The segmented control selects, it does
+  // not act (SPEC §7.4), so until the user touches it the pre-set value must
+  // track `defaultBreakDurationSeconds` — including the first snapshot, which
+  // arrives after this component first renders.
+  const [chosenBreakMin, setChosenBreakMin] = useState<number | null>(null);
   const [customMin, setCustomMin] = useState("");
 
   const awaiting = snap?.state.timerState === "AwaitingDecision";
   const onBreak = isBreak(snap);
+  const breakMin = chosenBreakMin ?? Math.round(breakDefaultMs(snap) / 60_000);
+  const setBreakMin = setChosenBreakMin;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

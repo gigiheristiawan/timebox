@@ -45,11 +45,62 @@ export interface MachineState {
   currentBlockId: string | null;
 }
 
+export type Theme = "System" | "Light" | "Dark";
+
+/** SPEC §4.4. Durations are milliseconds like everything else on the wire. */
+export interface Settings {
+  launchAtLogin: boolean;
+  theme: Theme;
+  defaultBlockDurationMs: number;
+  defaultBreakDurationMs: number;
+  expirationSound: boolean;
+  systemNotification: boolean;
+  availableWorkMsPerDay: number;
+  menuBarShowTimer: boolean;
+  /** The one-time panel pointing at the menu bar has been dismissed (D12). */
+  firstRunDone: boolean;
+}
+
+/** All computed by `core::summary` in Rust. The UI formats these; it does not
+ *  derive them (SPEC R7). */
+export interface Capacity {
+  availableMs: number;
+  allocatedMs: number;
+  /** Signed: negative means over capacity, which is shown but never blocked. */
+  unallocatedMs: number;
+  over: boolean;
+}
+
+export interface TopTask {
+  taskId: string;
+  title: string;
+  ms: number;
+}
+
+export interface Today {
+  workedMs: number;
+  breakMs: number;
+  /** Time at unanswered checkpoints — neither work nor break (D13). */
+  awayMs: number;
+  tasksCompleted: number;
+  tasksPending: number;
+  blocksCompleted: number;
+  switchedEarly: number;
+  top: TopTask[];
+}
+
+export interface Summary {
+  today: Today;
+  capacity: Capacity;
+}
+
 export interface Snapshot {
   state: MachineState;
   now: number;
   remainingMs: number;
   stalenessMs: number | null;
+  summary: Summary;
+  settings: Settings;
 }
 
 export interface HealthReport {

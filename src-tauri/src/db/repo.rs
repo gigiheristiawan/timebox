@@ -40,19 +40,21 @@ pub fn save(conn: &mut Connection, state: &MachineState, now: Millis) -> rusqlit
         tx.execute(
             "INSERT INTO time_blocks (id, kind, task_id, planned_ms, extension_ms, interruptions,
                                       actual_ms, status, started_at, ended_at, end_at, paused_at,
-                                      remaining_when_paused_ms, accumulated_active_ms, last_resume_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
+                                      remaining_when_paused_ms, accumulated_active_ms, last_resume_at,
+                                      away_ms)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
              ON CONFLICT(id) DO UPDATE SET
                 extension_ms=excluded.extension_ms, interruptions=excluded.interruptions,
                 actual_ms=excluded.actual_ms, status=excluded.status,
                 ended_at=excluded.ended_at, end_at=excluded.end_at, paused_at=excluded.paused_at,
                 remaining_when_paused_ms=excluded.remaining_when_paused_ms,
                 accumulated_active_ms=excluded.accumulated_active_ms,
-                last_resume_at=excluded.last_resume_at",
+                last_resume_at=excluded.last_resume_at, away_ms=excluded.away_ms",
             params![
                 b.id, b.kind.as_str(), b.task_id, b.planned_ms, b.extension_ms, b.interruptions,
                 b.actual_ms, b.status.as_str(), b.started_at, b.ended_at, b.end_at, b.paused_at,
-                b.remaining_when_paused_ms, b.accumulated_active_ms, b.last_resume_at
+                b.remaining_when_paused_ms, b.accumulated_active_ms, b.last_resume_at,
+                b.away_ms
             ],
         )?;
     }
@@ -107,7 +109,7 @@ pub fn load(conn: &Connection) -> rusqlite::Result<MachineState> {
         let mut stmt = conn.prepare(
             "SELECT id, kind, task_id, planned_ms, extension_ms, interruptions, actual_ms,
                     status, started_at, ended_at, end_at, paused_at,
-                    remaining_when_paused_ms, accumulated_active_ms, last_resume_at
+                    remaining_when_paused_ms, accumulated_active_ms, last_resume_at, away_ms
              FROM time_blocks ORDER BY started_at",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -129,6 +131,7 @@ pub fn load(conn: &Connection) -> rusqlite::Result<MachineState> {
                 remaining_when_paused_ms: r.get(12)?,
                 accumulated_active_ms: r.get(13)?,
                 last_resume_at: r.get(14)?,
+                away_ms: r.get(15)?,
             })
         })?;
         for b in rows {
