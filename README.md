@@ -132,7 +132,12 @@ Nothing in Settings can switch the checkpoint off. Expiry always requires a deci
 
 Requires **macOS 13+**. Apple Silicon and Intel (universal binary).
 
-There is no published release yet — build it from source:
+**[Download TimeBox 0.1.0](https://github.com/gigiheristiawan/timebox/releases/latest)** —
+open the DMG and drag TimeBox to Applications. The build is signed with a
+Developer ID certificate and notarized by Apple, so it opens without a
+Gatekeeper warning.
+
+Or build it from source:
 
 ```bash
 git clone git@github.com:gigiheristiawan/timebox.git

@@ -13,6 +13,8 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 
 | Date (WIB)       | Change                                                                                                                                                                        |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-20 20:45 | **8.7 done — 0.1.0 published.** Release live with the notarized DMG attached, Pages landing page built. Phase 8 is 7/8; only the 8.6 acceptance pass remains. Totals corrected to 65/67 (they still counted a 7-task Phase 8). |
+| 2026-08-20 20:35 | Doc audit. Three rows described superseded mechanisms: 8.1 credited `icons/generate.py` (the icon is exported artwork now), 6.1 said the tray glyph is drawn in `tray.rs` (it is the asset `icons/tray.png`), and the Phase 4 note still told the reader `grep TEMPORARY src/` finds the 1-minute test durations (8.0 removed them). |
 | 2026-08-20 17:50 | **8.3 and 8.4 complete.** Signed, notarized, stapled universal build verified — all 7 checks in the new `scripts/verify-release.sh` pass, app and DMG both stapled. Supersedes the 16:45 entry. |
 | 2026-08-20 16:45 | **8.3/8.4 unblocked** — the Developer ID Application certificate exists, superseding every "blocked" entry below. Both are still open: the notarized build has not been produced. Added 8.7 (publish the release + Pages page); README, landing page, screenshots and MIT licence are in the repo. |
 | 2026-08-20 11:00 | **Bundle identifier changed** `com.timebox.app` → `xyz.gigiheristiawan.timebox`, before the first signed build rather than after. The identifier also names the data directory, so the existing database was copied to `~/Library/Application Support/xyz.gigiheristiawan.timebox/` (integrity check `ok`, 4 tasks / 8 blocks / schema 2). The old directory is left in place as a fallback and can be deleted once the rename is confirmed working. Earlier entries in this file naming the old path were rewritten, since the path they gave would otherwise send a reader to the wrong database. |
@@ -50,8 +52,8 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 | 5 | Expiration checkpoint | 10 / 10 | ✅ Done |
 | 6 | Menu bar | 7 / 7 | ✅ Done (test 21 still needs a manual pass) |
 | 7 | Polish | 11 / 11 | ✅ Done (surfaces need a manual pass) |
-| 8 | Release | 7 / 8 | 🟡 signed, notarized, stapled build verified; 8.6 acceptance pass and 8.7 publish remain |
-| | **Total** | **63 / 66** | |
+| 8 | Release | 7 / 8 | 🟡 **0.1.0 published**; only 8.6, the manual acceptance pass on the shipped build, remains |
+| | **Total** | **65 / 67** | |
 
 **Status key:** ⬜ Not started · 🟡 In progress · ✅ Done · ⛔ Blocked · ⏸ Deferred
 
@@ -149,7 +151,7 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 **Exit criteria:** acceptance tests 1–5 and 17–20 verified on the built app, including with the app hidden.
 **✅ Met 2026-08-19** — `RUNNING → AWAITING_DECISION` confirmed on the shipped binary via the tick loop. Window behavior confirmed by Gigih running `tauri:dev`: the checkpoint appears full-screen, comes to the front from another app (**Test 5**), refuses `Cmd+W` and `Esc`, and a decision dismisses it and starts the next task.
 
-> **Temporary for testing:** a `1 min (test)` task duration and a `1m` break length. Both marked `TEMPORARY` in source and tracked as cleanup task 8.0 — `grep TEMPORARY src/` finds them.
+> **Temporary for testing (removed):** a `1 min (test)` task duration and a `1m` break length existed to make the checkpoint reachable quickly. Both were removed in 8.0 — `grep -r TEMPORARY src/` is now empty.
 
 | # | Task | Status | Notes |
 |---|---|---|---|
@@ -180,7 +182,7 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 
 | # | Task | Status | Notes |
 |---|---|---|---|
-| 6.1 | Menu bar item with template image (adapts to light/dark) | ✅ | Ring glyph generated as RGBA in `tray.rs`, `icon_as_template(true)`; replaced by the real icon in 8.1 |
+| 6.1 | Menu bar item with template image (adapts to light/dark) | ✅ | Now the exported asset `icons/tray.png`, loaded by `platform/tray.rs` with `icon_as_template(true)` (tauri feature `image-png` decodes it). It was originally a ring glyph drawn as RGBA in `tray.rs` |
 | 6.2 | Dynamic title: `◉ 24:17` / `◉ PAUSED` / `◔ BREAK 4:12` / `⚠ TIME'S UP` | ✅ | `core/menubar.rs`, 6 tests. Minutes are zero-padded (`BREAK 04:12`) so the title cannot change width mid-countdown |
 | 6.3 | Title updates at most 1 Hz, driven by the Rust tick | ✅ | Refreshed from the tick callback and from `dispatch`; the push is skipped when the string is unchanged |
 | 6.4 | Popover — current, countdown, next, Pause/Skip, queue, menu | ✅ | `src/components/Popover.tsx`, 320×420, hides on blur. At a checkpoint it shows no controls — the checkpoint has no side doors. Placement verified on a two-display setup. Styled from the prototype, not the spec's bullet list |
@@ -221,11 +223,12 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 ## Phase 8 — Release
 
 **Goal:** a build that can be handed to someone else.
-**Status 2026-08-20 17:50:** 8.0–8.5 done. A signed, notarized, stapled
-universal build exists and passes every check in `./scripts/verify-release.sh`
-— including Gatekeeper and stapling on the **DMG**, which `tauri build` does not
-notarize on its own (RELEASE.md §3). Remaining: 8.6, the manual acceptance pass
-on that build, and 8.7, publishing it.
+**Status 2026-08-20 20:45:** 8.0–8.5 and 8.7 done — **0.1.0 is published**:
+signed, notarized and stapled (app *and* DMG), attached to the v0.1.0 release,
+with the landing page live on Pages. The one open item is **8.6**, the manual
+acceptance pass of tests 1–20 on the shipped build. It is open on purpose and
+worth doing even post-publication: tests 9, 14 and 15 encode the product thesis,
+and a failure there is a reason to pull the release, not to patch forward.
 
 **8.5 measured** on the universal build (`TimeBox.app`, 9.7 MB; DMG 5.3 MB):
 
@@ -243,13 +246,13 @@ The idle figure is the one the spec sets, and the condvar park holds exactly: ze
 | # | Task | Status | Notes |
 |---|---|---|---|
 | 8.0 | **Remove the temporary 1-minute test durations** — task duration select and break-length selector | ✅ | Both gone; `grep -r TEMPORARY src/` is now empty. The duration select instead offers the configured default when it falls outside the standard list |
-| 8.1 | Real app icon, all required sizes | ✅ | `src-tauri/icons/generate.py` — committed as a **script**, so the icon has a reviewable source. The mark is the same `◉` the tray draws, so Dock and menu bar read as one app |
+| 8.1 | Real app icon, all required sizes | ✅ | **Exported artwork**, regenerated from a 1024px master with `npm run tauri icon`. Supersedes the code-drawn icon: `src-tauri/icons/generate.py` is no longer the source and must not be run — it overwrites the exported set. The tray mark is a separate asset, `icons/tray.png`, which `tauri icon` does not produce. Export geometry in RELEASE.md §1 |
 | 8.2 | Universal binary (`universal-apple-darwin`) | ✅ | `npm run tauri:build:universal`; both Rust targets installed. Verify with `lipo -archs` |
 | 8.3 | Developer ID signing | ✅ | **Done 2026-08-20.** Universal build signed with `Developer ID Application: Gigih Eristiawan (SQ3B3PDL4S)`, hardened runtime on, `x86_64 arm64` intact, `spctl` → *accepted, source=Notarized Developer ID*. The earlier smoke test had already established: A smoke-test build signed with the *Apple Development* cert passes `codesign --verify --deep --strict`, keeps the universal binary intact, embeds `TeamIdentifier=SQ3B3PDL4S`, and has the **hardened runtime on** (`flags=0x10000`), which is what notarization requires. `spctl` rejects it solely because a Development cert is not a Developer ID one. The **Developer ID Application** cert is now in the login keychain; nothing in the repo changed when it arrived, since Tauri reads `APPLE_SIGNING_IDENTITY` from the environment. RELEASE.md §3 |
 | 8.4 | Notarization + stapling | ✅ | **Done 2026-08-20**, verified by `./scripts/verify-release.sh` (all 7 checks green). One trap found and recorded in RELEASE.md §3: `tauri build` notarizes and staples the **`.app` only** — the DMG it wraps around it is signed but unnotarized, and needs its own `notarytool submit` + `stapler staple`. Both artifacts now carry tickets. A dedicated `Developer`-role App Store Connect API key was created for this project (separate from the EAS key, so revoking one cannot break the other) and **validated against Apple's notary service** on 2026-08-20. Unsigned builds stay dev-only — Gatekeeper quarantines them on any other Mac |
 | 8.5 | Performance check: < 80 MB idle, ~0% CPU when idle/paused | ✅ | Measured on the universal build — see the Phase 8 note below |
 | 8.6 | Full manual pass of acceptance tests 1–20 on the notarized build | ⬜ | Gigih's; needs 8.4 first, since "on the notarized build" is the point |
-| 8.7 | Publish: GitHub release with the notarized DMG + Pages landing page | ⬜ | README, `docs/index.html`, screenshots and MIT licence landed 2026-08-20. Procedure in RELEASE.md §6. Needs 8.4 — an unsigned DMG behind a public download link fails Gatekeeper for every visitor |
+| 8.7 | Publish: GitHub release with the notarized DMG + Pages landing page | ✅ | **Done 2026-08-20.** [v0.1.0](https://github.com/gigiheristiawan/timebox/releases/tag/v0.1.0) published with `TimeBox_0.1.0_universal.dmg` (5.5 MB) attached, notes from `docs/release-notes/0.1.0.md`. Pages serving `docs/` from `main` is built and live at <https://gigiheristiawan.github.io/timebox/>. README's install section now links the download instead of source-only build steps |
 
 ---
 

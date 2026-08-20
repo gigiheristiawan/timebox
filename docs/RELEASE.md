@@ -3,10 +3,12 @@
 How to produce a distributable TimeBox build. Phase 8 of
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Current state:** a signed, notarized, stapled universal 0.1.0 build exists and
-passes every check in `./scripts/verify-release.sh` — app and DMG both. Nothing
-is *published* yet: the DMG still has to be opened on a second Mac, and the
-GitHub release and Pages site (§6) have not been created.
+**Current state:** **0.1.0 is published.** The signed, notarized, stapled
+universal DMG passes every check in `./scripts/verify-release.sh` (app and DMG
+both) and is attached to the [v0.1.0
+release](https://github.com/gigiheristiawan/timebox/releases/tag/v0.1.0); the
+landing page is live at <https://gigiheristiawan.github.io/timebox/>. This
+runbook is now the procedure for the *next* release.
 
 ---
 
@@ -14,6 +16,7 @@ GitHub release and Pages site (§6) have not been created.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-20 18:10 | §6: `--notes-file docs/release-notes/0.1.0.md` restored to the release command now that the file exists, and the one-file-per-release convention recorded. |
 | 2026-08-20 17:30 | **`tauri build` notarizes the `.app` but not the DMG** — observed on the first Developer ID build: app `Notarized Developer ID` and stapled, DMG `Unnotarized Developer ID` with no ticket. §3 now carries the `notarytool submit` + `stapler staple` step for the container, and verification moved to `scripts/verify-release.sh`, which checks stapling on **both** artifacts. |
 | 2026-08-20 16:45 | **Unblocked:** the Developer ID Application certificate exists — `security find-identity` lists it. Supersedes every "blocked on credentials" line above and the old §3 title *one missing certificate*; §3 now reads as procedure, not a blocker. |
 | 2026-08-20 16:20 | §6 added — publishing: the GitHub release the download button points at, and Pages serving `docs/`. Icon paths in `docs/index.html` vendored under `docs/` so they survive publication. |
@@ -415,12 +418,16 @@ until one non-draft release exists; after that it always redirects to the newest
 one, so the link never needs editing again.
 
 ```bash
-# after a notarized, stapled universal build (§2, §3)
 # only after ./scripts/verify-release.sh exits clean, DMG checks included
 gh release create v0.1.0 \
   src-tauri/target/universal-apple-darwin/release/bundle/dmg/TimeBox_0.1.0_universal.dmg \
-  --title "TimeBox 0.1.0" --draft
+  --title "TimeBox 0.1.0" \
+  --notes-file docs/release-notes/0.1.0.md \
+  --draft
 ```
+
+Release notes live at `docs/release-notes/<version>.md`, one file per release,
+so the published notes are reviewable in the repo before they are public.
 
 The tag must match `version` in **both** `package.json` and
 `src-tauri/tauri.conf.json` — they are the version the app reports, and a
