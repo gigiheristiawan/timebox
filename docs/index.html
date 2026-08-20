@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TimeBox — Task rotation timeboxing for macOS</title>
+<meta name="description" content="A macOS menu bar timer that controls how long you work on a task, not whether the task is done. When a block expires it stops and asks.">
+<link rel="icon" href="../src-tauri/icons/32x32.png">
+
+<meta property="og:title" content="TimeBox — Task rotation timeboxing for macOS">
+<meta property="og:description" content="The timer controls how long you work on a task, not whether the task is completed.">
+<meta property="og:type" content="website">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  /* Palette lifted from src/styles.css so the site and the app agree. Light is
+     the base definition; only the tokens are redefined for dark. */
+  :root {
+    --ground:#eff2f0; --surface:#fbfcfb; --surface-2:#f1f4f2; --surface-3:#e6ebe8;
+    --ink:#141c19; --ink-2:#4a5854; --ink-3:#7c8a85;
+    --line:#d8e0db; --line-2:#c3cfc9;
+    --accent:#276b5a; --accent-soft:#dceae4; --accent-ink:#194c40;
+    --alert:#b93c22; --alert-soft:#f6dfd8;
+    --shadow:0 20px 50px -12px rgba(12,30,24,.34), 0 2px 6px rgba(12,30,24,.1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#0d1210; --surface:#18211d; --surface-2:#1e2823; --surface-3:#26312b;
+      --ink:#e4ede8; --ink-2:#a3b2ac; --ink-3:#75847e;
+      --line:#2c3833; --line-2:#3a4842;
+      --accent:#4fb79b; --accent-soft:#1c332c; --accent-ink:#8fd8c4;
+      --alert:#f0765c; --alert-soft:#3a1d16;
+      --shadow:0 22px 55px -14px rgba(0,0,0,.7), 0 2px 6px rgba(0,0,0,.4);
+    }
+  }
+
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--ground); color:var(--ink);
+    font:15px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono { font-family:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .wrap { max-width:940px; margin:0 auto; padding:0 20px; }
+  img { max-width:100%; height:auto; display:block; }
+  a { color:var(--accent-ink); }
+  @media (prefers-color-scheme: dark) { a { color:var(--accent); } }
+
+  /* hero */
+  header { text-align:center; padding:64px 0 40px; }
+  header img.icon { width:88px; margin:0 auto 18px; }
+  h1 { font-size:34px; line-height:1.15; letter-spacing:-.02em; margin:0 0 10px; font-weight:600; }
+  .tagline { font-size:17px; color:var(--ink-2); margin:0 auto 8px; max-width:34ch; }
+  .premise {
+    max-width:46ch; margin:22px auto 0; padding:14px 18px;
+    border-left:3px solid var(--accent); background:var(--surface);
+    border-radius:0 8px 8px 0; text-align:left; color:var(--ink-2); font-size:15px;
+  }
+  .premise b { color:var(--ink); font-weight:600; }
+
+  /* download */
+  .dl { display:flex; flex-direction:column; align-items:center; gap:10px; margin:30px 0 8px; }
+  .btn {
+    display:inline-block; background:var(--accent); color:#fff; text-decoration:none;
+    font-size:16px; font-weight:600; padding:13px 28px; border-radius:9px;
+    box-shadow:var(--shadow); transition:filter .15s;
+  }
+  .btn:hover { filter:brightness(1.08); }
+  .meta { font-size:13px; color:var(--ink-3); }
+  .meta a { color:inherit; }
+
+  /* sections */
+  section { padding:34px 0; border-top:1px solid var(--line); }
+  h2 { font-size:13px; font-weight:600; letter-spacing:.14em; text-transform:uppercase;
+       color:var(--ink-3); margin:0 0 18px; font-family:"IBM Plex Mono", monospace; }
+  p { margin:0 0 14px; color:var(--ink-2); }
+  p.lead { color:var(--ink); }
+
+  figure { margin:0 0 26px; }
+  figure img { border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); }
+  figcaption { font-size:13px; color:var(--ink-3); margin-top:9px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px,1fr)); gap:26px; }
+
+  ul.points { list-style:none; padding:0; margin:0; display:grid; gap:12px; }
+  ul.points li { padding-left:20px; position:relative; color:var(--ink-2); }
+  ul.points li::before { content:"—"; position:absolute; left:0; color:var(--accent); }
+  ul.points b { color:var(--ink); font-weight:600; }
+
+  code { font-family:"IBM Plex Mono", monospace; font-size:.9em;
+         background:var(--surface-3); padding:1px 6px; border-radius:4px; }
+  pre { background:var(--surface); border:1px solid var(--line); border-radius:9px;
+        padding:14px 16px; overflow-x:auto; }
+  pre code { background:none; padding:0; font-size:12.5px; line-height:1.7; }
+
+  .note { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--accent);
+          border-radius:0 8px 8px 0; padding:14px 18px; font-size:14px; }
+
+  footer { border-top:1px solid var(--line); padding:26px 0 50px; text-align:center;
+           font-size:13px; color:var(--ink-3); }
+  footer a { color:var(--ink-2); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header>
+    <img class="icon" src="../src-tauri/icons/128x128@2x.png" alt="TimeBox icon">
+    <h1>TimeBox</h1>
+    <p class="tagline">Task rotation timeboxing for macOS.</p>
+
+    <p class="premise">
+      The timer controls <b>how long you work on a task</b>, not whether the task is completed.
+    </p>
+
+    <div class="dl">
+      <a class="btn" href="https://github.com/gigiheristiawan/timebox/releases/latest">Download for macOS</a>
+      <p class="meta">
+        Universal — Apple Silicon &amp; Intel · macOS 13+ · signed and notarized by Apple<br>
+        <a href="https://github.com/gigiheristiawan/timebox">Source on GitHub</a>
+      </p>
+    </div>
+  </header>
+
+  <section>
+    <h2>Why it stops</h2>
+    <p class="lead">
+      Most timers assume the block and the task end together. They don't. You reach 30:00 with the
+      work half-finished, and the app either nags you or quietly rolls on to the next thing.
+    </p>
+    <p>
+      TimeBox stops. When a block expires it opens a checkpoint — no dismiss, no close, no timeout,
+      no <code>Esc</code> — and asks what you want to do with the task. Finishing the block and
+      finishing the task are separate decisions, and only you make the second one.
+    </p>
+    <p>
+      This is not a Pomodoro app. No fixed cycles, no automatic breaks, no streak to protect.
+    </p>
+
+    <figure>
+      <img src="screenshots/checkpoint.png" alt="The expiration checkpoint reading TIME'S UP, with four compound actions and an extend option">
+      <figcaption>
+        The task decision is the row; the transition is the verb. Press <code>1</code>–<code>5</code>,
+        or <code>Return</code> for the recommended choice.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>What it guarantees</h2>
+    <ul class="points">
+      <li><b>Block completion is not task completion.</b> A task is done only when you say so.</li>
+      <li><b>Switching parks a block, never re-grants one.</b> Set a task down at 29:00 of a 30:00
+          block and come back later, and you resume the remaining 1:00 — not a fresh 30.</li>
+      <li><b>The checkpoint has no exit.</b> No dismiss, later, or continue, and no timeout that
+          resolves it for you.</li>
+      <li><b>Quitting doesn't stop the clock.</b> A block keeps consuming its allocation while the
+          app is closed, exactly as it does while the Mac sleeps. Otherwise quitting would be a way
+          to bank time.</li>
+      <li><b>Breaks are rest.</b> They carry no task, never count as worked time, and never consume
+          the day's capacity.</li>
+      <li><b>Time at an unanswered checkpoint is surfaced, never guessed at.</b> It counts as away —
+          neither work nor rest — and is never back-credited to a task.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Lives in the menu bar</h2>
+    <div class="grid">
+      <figure>
+        <img src="screenshots/popover.png" alt="Menu bar popover showing the current task, countdown, next task and the queue">
+        <figcaption>A whole day is workable from the popover alone. <code>⌘⇧T</code> from any app.</figcaption>
+      </figure>
+      <figure>
+        <img src="screenshots/main-window.png" alt="Main window with rotation strip, queue, capacity and Today summary">
+        <figcaption>The main window adds the rotation strip, the day's capacity, and Today.</figcaption>
+      </figure>
+    </div>
+    <p>
+      There is no Dock icon and no app-switcher entry. No account, no network calls, no telemetry —
+      everything is a local SQLite database on your Mac.
+    </p>
+  </section>
+
+  <section>
+    <h2>Install</h2>
+    <p>
+      Download the release, open it, and drag <b>TimeBox</b> to your Applications folder. It is
+      signed with a Developer ID certificate and notarized by Apple, so it opens without a
+      Gatekeeper warning.
+    </p>
+    <p>
+      On first launch, look for the <picture><source media="(prefers-color-scheme: dark)" srcset="assets/tray-dark.png"><img src="assets/tray-light.png" alt="the TimeBox menu bar icon" style="width:15px;height:15px;display:inline;vertical-align:-2px"></picture> mark in your menu bar — there is no Dock icon by design.
+    </p>
+
+    <div class="note">
+      <b>Prefer to build it yourself?</b>
+      <pre><code>git clone https://github.com/gigiheristiawan/timebox.git
+cd timebox &amp;&amp; npm install
+npm run tauri:build:universal</code></pre>
+      Needs the Rust toolchain plus <code>aarch64-apple-darwin</code> and
+      <code>x86_64-apple-darwin</code>.
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      MIT licensed · <a href="https://github.com/gigiheristiawan/timebox">github.com/gigiheristiawan/timebox</a><br>
+      Built with Tauri, Rust and React.
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>
