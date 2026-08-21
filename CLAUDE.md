@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Date (WIB)       | Change                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-08-21 14:30 | **Rule 17 added** — hand over at most two steps at a time, then stop and wait. |
 | 2026-08-21 14:00 | The Mac App Store `.pkg` is an upload artifact and **cannot be launched locally**; `scripts/sandbox-smoketest.sh` re-signs the bundle with Developer ID + sandbox for local verification. Corrects the earlier smoke-test instruction. |
 | 2026-08-21 09:35 | Startup now deletes 0.1.0's leftover `~/Library/LaunchAgents/TimeBox.plist` — it would otherwise keep launching the app behind the setting's back. |
 | 2026-08-21 09:10 | Login item is **reconciled at every launch**, not only on a settings edit, and the snapshot carries `launchAtLoginActive` — what macOS actually did, versus what the user asked for. |
@@ -145,6 +146,16 @@ Make source changes and stop. Do not run `npm run tauri:dev` / `tauri:build`, an
 Run what actually proves something: `cargo test`, `cargo clippy --all-targets -- -D warnings`, `npm run typecheck`. Then hand over with a short list of what to look at. Gigih reruns `tauri:dev` and reports back.
 
 Build or launch only when asked, or when the check is genuinely non-visual — schema written, state persisted, process CPU at idle.
+
+### Rule 17 - Hand over at most two steps at a time
+
+When asking Gigih to *do* something, give **at most 2 steps**, then stop and wait. He will come back and ask what's next.
+
+A long instruction block is unfollowable — the thread gets lost and none of it gets acted on. This applies to setup walkthroughs, verification checklists, and install sequences equally.
+
+Do not pad a reply that contains steps with optional extras, "while you're there" asides, "worth knowing" caveats, or offers of further work. Those enlarge the pile even when they are not themselves steps. Hold them until asked.
+
+The same applies to scripts: one that prints a ten-point checklist has just moved the problem. Have him run one thing and report back.
 
 ## Commands
 
