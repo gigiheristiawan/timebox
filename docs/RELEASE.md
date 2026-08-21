@@ -16,6 +16,7 @@ runbook is now the procedure for the *next* release.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-21 15:20 | §7.3: **ITMS-91109** — the provisioning profile carries `com.apple.quarantine` from the browser download, and `cp` preserves it; one quarantined file rejects the whole submission, reported only by email ~20 min after a *successful* upload. `build-mas.sh` now runs `xattr -cr` before signing and asserts none survives. Also: `CFBundleVersion` must increase on every upload, a failed delivery included. |
 | 2026-08-21 14:00 | **Correction to §7.3:** the MAS .pkg cannot be installed and launched locally — Gatekeeper rejects the 3rd Party Mac Developer signature and the profile authorises no devices, so `open` fails with a launchd spawn error. The previous "install the .pkg, then check the container" instruction was wrong. `scripts/sandbox-smoketest.sh` added for local sandbox verification, and the installer's bundle-relocation trap recorded. |
 | 2026-08-21 09:35 | §7.1: the 0.1.0 `LaunchAgents/TimeBox.plist` is deleted at startup — an upgrade-path bug, since every 0.1.0 user who enabled launch-at-login has one and nothing else would remove it. |
 | 2026-08-21 09:10 | §7.1: recorded that `SMAppService` can refuse where the LaunchAgent plist could not, and the reconcile-at-launch + `launchAtLoginActive` handling that makes the refusal visible instead of silent. |
@@ -591,6 +592,42 @@ rejection — container creation, SQLite, notifications, the global shortcut, an
 launch-at-login through `SMAppService`, which no dev build can test because an
 unbundled binary is refused. It does not cover the MAS provisioning path; use
 **TestFlight for macOS** after uploading for that.
+
+### Quarantine will reject the submission, silently and late
+
+The provisioning profile is downloaded through a browser, so it carries
+`com.apple.quarantine`, and `cp` preserves extended attributes. Apple rejects
+any submission containing a quarantined file:
+
+```
+ITMS-91109: Invalid package contents - The package contains one or more files
+with the com.apple.quarantine extended file attribute, such as
+"…/TimeBox.app/Contents/embedded.provisionprofile".
+```
+
+What makes this expensive is *when* you find out. `altool --validate-app`
+passes. `altool --upload-app` reports **UPLOAD SUCCEEDED**. The rejection
+arrives by email around twenty minutes later, and the build never appears in
+App Store Connect at all — so the obvious reading, that it is still processing,
+is wrong.
+
+`build-mas.sh` now runs `xattr -cr` on the staged bundle **before** signing and
+fails the build if any quarantined file survives. The ordering matters:
+`codesign` keeps signatures for some file types in extended attributes, so
+clearing them afterwards would invalidate the signature it just wrote.
+
+`com.apple.provenance` remains on most files afterwards. macOS re-adds it and
+Apple does not reject it; only quarantine is prohibited.
+
+### Every upload needs a higher CFBundleVersion
+
+Including one that failed processing — the delivery is registered even when the
+build is rejected. Tauri derives both version keys from `version` in
+`tauri.conf.json`, so `CFBundleVersion` is overridden in `src-tauri/Info.plist`
+and **must be bumped by hand for each submission**. `CFBundleShortVersionString`
+stays at the marketing version.
+
+Build 1 (`0.1.0`) was rejected for quarantine; build 2 is the first accepted one.
 
 ### The installer will hide your app somewhere else
 

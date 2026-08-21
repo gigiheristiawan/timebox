@@ -47,6 +47,17 @@ sed "s/TEAM_ID_PLACEHOLDER/$TEAM_ID/g" src-tauri/entitlements.mas.plist > "$ENTI
 grep -q "$TEAM_ID.$BUNDLE_ID" "$ENTITLEMENTS" \
   || fail "entitlements application-identifier does not match $BUNDLE_ID"
 
+# Anything downloaded through a browser carries com.apple.quarantine, and the
+# provisioning profile always is. A single quarantined file rejects the whole
+# submission (ITMS-91109) — after upload, by email, ~20 minutes later. Strip
+# every extended attribute from the staged copy.
+#
+# This must happen BEFORE signing: codesign stores signatures for some file
+# types in extended attributes, so clearing them afterwards would quietly
+# invalidate the very signature it just wrote.
+echo "==> clearing extended attributes"
+xattr -cr "$APP"
+
 echo "==> signing"
 # Nested code first: a signature over the bundle is only valid if what it
 # contains was already sealed.
@@ -58,6 +69,9 @@ codesign --force --timestamp --options runtime \
 codesign --verify --strict --verbose=2 "$APP"
 codesign -d --entitlements - --xml "$APP" | grep -q app-sandbox \
   || fail "the signed app is not sandboxed"
+if xattr -lr "$APP" | grep -q com.apple.quarantine; then
+  fail "a quarantined file survived in $APP — Apple rejects these (ITMS-91109)"
+fi
 
 echo "==> packaging"
 productbuild --component "$APP" /Applications --sign "$INSTALLER_CERT" "$PKG"
