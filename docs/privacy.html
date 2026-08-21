@@ -3,13 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TimeBox — Task rotation timeboxing for macOS</title>
-<meta name="description" content="A macOS menu bar timer that controls how long you work on a task, not whether the task is done. When a block expires it stops and asks.">
+<title>TimeBox — Privacy Policy</title>
+<meta name="description" content="TimeBox collects nothing. It has no network code, no analytics, and no accounts. Everything it stores stays on your Mac.">
 <link rel="icon" href="assets/icon-32.png">
-
-<meta property="og:title" content="TimeBox — Task rotation timeboxing for macOS">
-<meta property="og:description" content="The timer controls how long you work on a task, not whether the task is completed.">
-<meta property="og:type" content="website">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -102,113 +98,137 @@
            font-size:13px; color:var(--ink-3); }
   footer a { color:var(--ink-2); }
 </style>
+<style>
+  header { padding:56px 0 28px; text-align:left; }
+  header h1 { margin:0 0 6px; }
+  .updated { color:var(--ink-3); font-size:13px; margin:0; }
+  section h2 { margin-top:34px; }
+  dl { margin:0; }
+  dt { font-weight:600; margin-top:16px; }
+  dd { margin:4px 0 0; color:var(--ink-2); }
+</style>
 </head>
 <body>
 
 <div class="wrap">
 
   <header>
-    <img class="icon" src="assets/icon-256.png" alt="TimeBox icon">
-    <h1>TimeBox</h1>
-    <p class="tagline">Task rotation timeboxing for macOS.</p>
-
-    <p class="premise">
-      The timer controls <b>how long you work on a task</b>, not whether the task is completed.
-    </p>
-
-    <div class="dl">
-      <a class="btn" href="https://github.com/gigiheristiawan/timebox/releases/latest">Download for macOS</a>
-      <p class="meta">
-        Universal — Apple Silicon &amp; Intel · macOS 13+ · signed and notarized by Apple<br>
-        <a href="https://github.com/gigiheristiawan/timebox">Source on GitHub</a>
-      </p>
-    </div>
+    <p class="updated"><a href="index.html">← TimeBox</a></p>
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated 21 August 2026</p>
   </header>
 
   <section>
-    <h2>Why it stops</h2>
     <p class="lead">
-      Most timers assume the block and the task end together. They don't. You reach 30:00 with the
-      work half-finished, and the app either nags you or quietly rolls on to the next thing.
-    </p>
-    <p>
-      TimeBox stops. When a block expires it opens a checkpoint — no dismiss, no close, no timeout,
-      no <code>Esc</code> — and asks what you want to do with the task. Finishing the block and
-      finishing the task are separate decisions, and only you make the second one.
-    </p>
-    <p>
-      This is not a Pomodoro app. No fixed cycles, no automatic breaks, no streak to protect.
-    </p>
-
-    <figure>
-      <img src="screenshots/checkpoint.png" alt="The expiration checkpoint reading TIME'S UP, with four compound actions and an extend option">
-      <figcaption>
-        The task decision is the row; the transition is the verb. Press <code>1</code>–<code>5</code>,
-        or <code>Return</code> for the recommended choice.
-      </figcaption>
-    </figure>
-  </section>
-
-  <section>
-    <h2>What it guarantees</h2>
-    <ul class="points">
-      <li><b>Block completion is not task completion.</b> A task is done only when you say so.</li>
-      <li><b>Switching parks a block, never re-grants one.</b> Set a task down at 29:00 of a 30:00
-          block and come back later, and you resume the remaining 1:00 — not a fresh 30.</li>
-      <li><b>The checkpoint has no exit.</b> No dismiss, later, or continue, and no timeout that
-          resolves it for you.</li>
-      <li><b>Quitting doesn't stop the clock.</b> A block keeps consuming its allocation while the
-          app is closed, exactly as it does while the Mac sleeps. Otherwise quitting would be a way
-          to bank time.</li>
-      <li><b>Breaks are rest.</b> They carry no task, never count as worked time, and never consume
-          the day's capacity.</li>
-      <li><b>Time at an unanswered checkpoint is surfaced, never guessed at.</b> It counts as away —
-          neither work nor rest — and is never back-credited to a task.</li>
-    </ul>
-  </section>
-
-  <section>
-    <h2>Lives in the menu bar</h2>
-    <div class="grid">
-      <figure>
-        <img src="screenshots/popover.png" alt="Menu bar popover showing the current task, countdown, next task and the queue">
-        <figcaption>A whole day is workable from the popover alone. <code>⌘⇧T</code> from any app.</figcaption>
-      </figure>
-      <figure>
-        <img src="screenshots/main-window.png" alt="Main window with rotation strip, queue, capacity and Today summary">
-        <figcaption>The main window adds the rotation strip, the day's capacity, and Today.</figcaption>
-      </figure>
-    </div>
-    <p>
-      There is no Dock icon and no app-switcher entry. No account, no network calls, no telemetry —
-      everything is a local SQLite database on your Mac.
-    </p>
-  </section>
-
-  <section>
-    <h2>Install</h2>
-    <p>
-      Download the release, open it, and drag <b>TimeBox</b> to your Applications folder. It is
-      signed with a Developer ID certificate and notarized by Apple, so it opens without a
-      Gatekeeper warning.
-    </p>
-    <p>
-      On first launch, look for the <picture><source media="(prefers-color-scheme: dark)" srcset="assets/tray-dark.png"><img src="assets/tray-light.png" alt="the TimeBox menu bar icon" style="width:15px;height:15px;display:inline;vertical-align:-2px"></picture> mark in your menu bar — there is no Dock icon by design.
+      TimeBox collects no data about you. There are no accounts, no analytics,
+      no crash reporting, and no advertising. Nothing you type into it leaves
+      your Mac.
     </p>
 
     <div class="note">
-      <b>Prefer to build it yourself?</b>
-      <pre><code>git clone https://github.com/gigiheristiawan/timebox.git
-cd timebox &amp;&amp; npm install
-npm run tauri:build:universal</code></pre>
-      Needs the Rust toolchain plus <code>aarch64-apple-darwin</code> and
-      <code>x86_64-apple-darwin</code>.
+      This is not a promise about intent — it is a property of the program.
+      TimeBox contains no networking code at all: no HTTP client, no telemetry
+      library, no auto-updater, and no third-party SDK. The source is public
+      and can be read in full at
+      <a href="https://github.com/gigiheristiawan/timebox">github.com/gigiheristiawan/timebox</a>.
     </div>
+  </section>
+
+  <section>
+    <h2>What TimeBox stores, and where</h2>
+    <p>
+      Your tasks, time blocks, and settings are written to a single SQLite
+      database on your own Mac. Nothing else is stored anywhere.
+    </p>
+    <dl>
+      <dt>Mac App Store version</dt>
+      <dd class="mono">~/Library/Containers/xyz.gigiheristiawan.timebox/Data/Library/Application&nbsp;Support/</dd>
+      <dt>Direct download version</dt>
+      <dd class="mono">~/Library/Application&nbsp;Support/xyz.gigiheristiawan.timebox/</dd>
+    </dl>
+    <p>
+      The App Store version runs in Apple's App Sandbox, so it can only read
+      and write inside its own container. It cannot see the rest of your disk.
+    </p>
+  </section>
+
+  <section>
+    <h2>What TimeBox never does</h2>
+    <p>
+      It does not transmit your tasks, timings, or usage anywhere. It does not
+      read your files, contacts, calendar, location, camera, microphone, or
+      clipboard. It does not show ads, and it has no in-app purchases. No data
+      is sold or shared with anyone, because none is gathered in the first
+      place.
+    </p>
+  </section>
+
+  <section>
+    <h2>System permissions</h2>
+    <dl>
+      <dt>Notifications</dt>
+      <dd>
+        Used only to tell you a time block has ended. Notifications are
+        generated on your Mac and delivered by macOS; no notification content
+        is sent to a server.
+      </dd>
+      <dt>Launch at login</dt>
+      <dd>
+        Optional, off by default. When enabled, TimeBox registers itself with
+        macOS as a login item. You can revoke it at any time in System
+        Settings → General → Login Items.
+      </dd>
+      <dt>Outgoing network access</dt>
+      <dd>
+        The App Store version declares the standard
+        <span class="mono">network.client</span> entitlement. This is required
+        by the system web view TimeBox uses to draw its own interface — without
+        it, the window renders blank. TimeBox itself opens no connections. It
+        is listed here because you would otherwise find it in the app's
+        entitlements and reasonably wonder why.
+      </dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Deleting your data</h2>
+    <p>
+      Deleting the app removes the program. To remove your data as well, delete
+      the folder listed above for your version. There is no server-side copy,
+      so nothing else needs to be requested or erased, and there is no account
+      to close.
+    </p>
+  </section>
+
+  <section>
+    <h2>Children</h2>
+    <p>
+      TimeBox is not directed at children and collects no personal information
+      from anyone, of any age.
+    </p>
+  </section>
+
+  <section>
+    <h2>Changes</h2>
+    <p>
+      If a future version of TimeBox ever collects or transmits anything, this
+      page will say so before that version ships, and the change will be
+      visible in the public commit history.
+    </p>
+  </section>
+
+  <section>
+    <h2>Contact</h2>
+    <p>
+      Questions about this policy go to
+      <a href="https://github.com/gigiheristiawan/timebox/issues">github.com/gigiheristiawan/timebox/issues</a>.
+      Issues are public, so please don't include anything private in one.
+    </p>
   </section>
 
   <footer>
     <p>
-      MIT licensed · <a href="https://github.com/gigiheristiawan/timebox">github.com/gigiheristiawan/timebox</a> · <a href="privacy.html">Privacy</a><br>
+      MIT licensed · <a href="https://github.com/gigiheristiawan/timebox">github.com/gigiheristiawan/timebox</a><br>
       Built with Tauri, Rust and React.
     </p>
   </footer>
