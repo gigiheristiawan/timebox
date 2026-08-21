@@ -10,5 +10,12 @@
          App Store asks the export-compliance question on every upload. -->
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
+
+    <!-- Required by App Store validation (error 90242); a build without it is
+         rejected before it ever reaches review. Set here as well as via
+         `bundle.category` in tauri.conf.json so the value cannot go missing
+         if the generated plist changes. -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
 </dict>
 </plist>
