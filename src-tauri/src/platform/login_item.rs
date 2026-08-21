@@ -10,7 +10,7 @@
 //! Raw `msg_send!` rather than typed bindings because `SMAppService` has no
 //! crate in the tree and this is four selectors.
 
-use objc2::msg_send;
+use objc2::{msg_send, sel};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,7 +24,7 @@ const STATUS_ENABLED: isize = 1;
 /// the answer can change.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 
-/// `+[SMAppService mainApp]` — the service representing this bundle.
+/// `+[SMAppService mainAppService]` — the service representing this bundle.
 ///
 /// Returns `None` when there is no bundle to register. `mainApp` raises an
 /// Objective-C exception in that case, which Rust cannot catch — it aborts the
@@ -37,7 +37,18 @@ fn main_app() -> Option<Retained<AnyObject>> {
             return None;
         }
         let cls = objc2::runtime::AnyClass::get(c"SMAppService")?;
-        let obj: Option<Retained<AnyObject>> = msg_send![cls, mainApp];
+
+        // `mainApp` is the *Swift* name; the selector is `mainAppService`.
+        // Sending one the class does not implement raises, and an ObjC
+        // exception cannot be caught here — it aborts the process. So ask
+        // first: this module reaches AppKit through raw `msg_send`, where a
+        // wrong selector is a crash rather than a compile error.
+        let responds: bool = msg_send![cls, respondsToSelector: sel!(mainAppService)];
+        if !responds {
+            eprintln!("[timebox] SMAppService does not respond to mainAppService");
+            return None;
+        }
+        let obj: Option<Retained<AnyObject>> = msg_send![cls, mainAppService];
         obj
     }
 }
@@ -178,6 +189,27 @@ fn is_ours(contents: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// The selectors this module sends are resolved at runtime, so a wrong
+    /// name is not a compile error — it is an unrecognised-selector abort the
+    /// moment the app runs from a real bundle. `mainApp` (the Swift name) was
+    /// exactly that bug. This is the only check that catches it without a
+    /// signed, installed build.
+    #[test]
+    fn smappservice_exposes_every_selector_we_send() {
+        let cls = objc2::runtime::AnyClass::get(c"SMAppService")
+            .expect("ServiceManagement is linked and SMAppService exists");
+        let responds: bool =
+            unsafe { objc2::msg_send![cls, respondsToSelector: objc2::sel!(mainAppService)] };
+        assert!(responds, "+[SMAppService mainAppService] is missing");
+        for sel in [
+            objc2::sel!(registerAndReturnError:),
+            objc2::sel!(unregisterAndReturnError:),
+            objc2::sel!(status),
+        ] {
+            assert!(cls.instance_method(sel).is_some(), "-[SMAppService {sel:?}] is missing");
+        }
+    }
+
     /// The guard, not the registration, is what is testable here: the test
     /// binary is not a bundle, and reaching `SMAppService` from one aborts the
     /// process rather than returning an error.
