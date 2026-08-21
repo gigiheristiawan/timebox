@@ -16,6 +16,7 @@ runbook is now the procedure for the *next* release.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-21 14:00 | **Correction to §7.3:** the MAS .pkg cannot be installed and launched locally — Gatekeeper rejects the 3rd Party Mac Developer signature and the profile authorises no devices, so `open` fails with a launchd spawn error. The previous "install the .pkg, then check the container" instruction was wrong. `scripts/sandbox-smoketest.sh` added for local sandbox verification, and the installer's bundle-relocation trap recorded. |
 | 2026-08-21 09:35 | §7.1: the 0.1.0 `LaunchAgents/TimeBox.plist` is deleted at startup — an upgrade-path bug, since every 0.1.0 user who enabled launch-at-login has one and nothing else would remove it. |
 | 2026-08-21 09:10 | §7.1: recorded that `SMAppService` can refuse where the LaunchAgent plist could not, and the reconcile-at-launch + `launchAtLoginActive` handling that makes the refusal visible instead of silent. |
 | 2026-08-20 22:30 | **§7 added — Mac App Store**, a second channel beside the DMG. Records the three source changes that made it possible (private API dropped, `SMAppService` login item, `RunEvent::Reopen`), the one-time certificates/profile setup, `scripts/build-mas.sh`, and that the sandboxed build starts with an empty database because its container path differs. |
@@ -554,9 +555,63 @@ codesign -d --entitlements - --xml target-mas/TimeBox.app | grep app-sandbox
 lipo -archs target-mas/TimeBox.app/Contents/MacOS/TimeBox   # x86_64 arm64
 ```
 
-The script asserts both. The app **cannot be launched from `target-mas/`** — a
-Mac App Store profile only authorises the installed copy. To smoke-test, install
-the .pkg and confirm `~/Library/Containers/xyz.gigiheristiawan.timebox/` appears.
+The script asserts both.
+
+### The .pkg cannot be run locally — do not try
+
+A Mac App Store build launches only where the Mac App Store installed it.
+Installing the .pkg by hand and opening the app fails:
+
+```
+open /Applications/TimeBox.app
+# Launch failed. … NSPOSIXErrorDomain Code=163 "Launchd job spawn failed"
+```
+
+Nothing is wrong with the build when that happens. The signature verifies and
+satisfies its Designated Requirement; what fails is authorisation:
+
+```bash
+spctl -a -vvv -t exec /Applications/TimeBox.app     # rejected
+```
+
+Gatekeeper accepts Developer ID + notarized, or apps the store installed —
+a `3rd Party Mac Developer Application` signature is neither. And a Mac App
+Store provisioning profile carries no `ProvisionedDevices`, so no Mac is
+authorised. The .pkg is an **upload artifact, not an installable build**.
+
+### Local sandbox verification instead
+
+```bash
+./scripts/sandbox-smoketest.sh
+```
+
+It re-signs the same bundle with the **Developer ID** identity and the sandbox
+entitlement alone, which does run locally. That covers what actually risks a
+rejection — container creation, SQLite, notifications, the global shortcut, and
+launch-at-login through `SMAppService`, which no dev build can test because an
+unbundled binary is refused. It does not cover the MAS provisioning path; use
+**TestFlight for macOS** after uploading for that.
+
+### The installer will hide your app somewhere else
+
+`productbuild --component` marks the bundle relocatable, so Installer searches
+the disk for an existing bundle with the same `CFBundleIdentifier` and installs
+over *that* instead of `/Applications`:
+
+```
+PackageKit: Applications/TimeBox.app relocated to
+  …/src-tauri/target/universal-apple-darwin/release/bundle/macos/TimeBox.app
+```
+
+Any previous build output is a candidate, so this fires almost every time. It
+does not affect real store users — the Mac App Store installs apps directly,
+never through Installer.app. If you install the .pkg by hand anyway, delete the
+other bundles first, and note that a relocated install leaves them **root-owned**,
+so a second attempt needs `sudo rm -rf`. Check where it actually went with:
+
+```bash
+grep -i relocated /var/log/install.log | tail -2
+```
 
 ### 7.4 Review risks worth pre-empting
 

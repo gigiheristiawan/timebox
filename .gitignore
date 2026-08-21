@@ -6,3 +6,4 @@ src-tauri/gen/
 *.log
 .claude/settings.local.json
 target-mas/
+target-sandbox-test/

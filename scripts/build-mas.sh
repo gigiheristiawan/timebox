@@ -71,7 +71,12 @@ Upload with either:
     --apiKey <key-id> --apiIssuer <issuer-id>
   # or the Transporter app from the Mac App Store
 
-Note: the sandboxed app cannot be launched from $STAGE — a Mac App Store
-provisioning profile only authorises the installed copy. To smoke-test locally,
-install the .pkg, then check ~/Library/Containers/$BUNDLE_ID/ exists.
+Note: this .pkg is an upload artifact, NOT an installable build. Installing it
+by hand and launching the app fails ("Launchd job spawn failed"): Gatekeeper
+rejects a 3rd Party Mac Developer signature, and a Mac App Store provisioning
+profile authorises no devices. Nothing is wrong with the build when that happens.
+
+To verify the sandbox locally, use ./scripts/sandbox-smoketest.sh, which
+re-signs the same bundle with Developer ID + the sandbox entitlement. For the
+real Mac App Store path, use TestFlight for macOS after uploading.
 MSG

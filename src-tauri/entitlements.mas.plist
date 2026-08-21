@@ -8,6 +8,14 @@
     <key>com.apple.security.app-sandbox</key>
     <true/>
 
+    <!-- Required by WKWebView, not by TimeBox. WebKit's WebContent and
+         Networking processes do not spawn inside the sandbox without it, and a
+         webview with no renderer paints a blank window: the app runs, the
+         backend is fine, and nothing is denied in the log. TimeBox itself makes
+         no outbound connection — there is no network code in the app. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
     <!-- Both are required in a Mac App Store submission and must match the
          provisioning profile. <team-id> is substituted by scripts/build-mas.sh. -->
     <key>com.apple.application-identifier</key>

@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Date (WIB)       | Change                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-08-21 14:00 | The Mac App Store `.pkg` is an upload artifact and **cannot be launched locally**; `scripts/sandbox-smoketest.sh` re-signs the bundle with Developer ID + sandbox for local verification. Corrects the earlier smoke-test instruction. |
 | 2026-08-21 09:35 | Startup now deletes 0.1.0's leftover `~/Library/LaunchAgents/TimeBox.plist` — it would otherwise keep launching the app behind the setting's back. |
 | 2026-08-21 09:10 | Login item is **reconciled at every launch**, not only on a settings edit, and the snapshot carries `launchAtLoginActive` — what macOS actually did, versus what the user asked for. |
 | 2026-08-20 22:30 | **Mac App Store prep:** `macos-private-api` and `tauri-plugin-autostart` removed. Popover corners now come from `platform/window_corners.rs`, launch-at-login from `platform/login_item.rs` (`SMAppService`). See `docs/RELEASE.md` §7. |
