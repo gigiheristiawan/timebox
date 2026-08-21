@@ -5,3 +5,5 @@ src-tauri/gen/
 .DS_Store
 *.log
 .claude/settings.local.json
+target-mas/
+target-sandbox-test/

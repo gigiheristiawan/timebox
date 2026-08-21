@@ -13,16 +13,16 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# `macos-private-api` is what allows a transparent window, which is what gives
-# the popover its rounded corners. It rules out Mac App Store distribution;
-# TimeBox ships Developer ID + notarized (Phase 8), where it is fine.
+# No `macos-private-api`: it is what makes a transparent window possible, but
+# it reaches the webview background through a private WKWebView key, which the
+# App Store rejects. The popover's rounded corners come from
+# `platform/window_corners.rs` (public AppKit) instead.
 # `image-png` lets `Image::from_bytes` decode the tray asset at startup;
 # without it the tray icon would have to be a raw RGBA blob in the repo.
-tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
-tauri-plugin-autostart = "2"
 
 # SQLite lives in Rust only. There is deliberately no SQL plugin: the webview
 # must not be able to reach the database (SPEC R5/R6).
@@ -37,6 +37,12 @@ uuid = { version = "1", features = ["v4"] }
 # Local midnight only. "Today" is a wall-clock day in the user's timezone, and
 # resolving that needs a real tz database rather than a fixed UTC offset.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Launch at login (SMAppService) and the popover's rounded corners, both public
+# AppKit. `tauri-plugin-autostart` is deliberately absent: it writes a plist
+# into ~/Library/LaunchAgents, which the App Sandbox denies.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
 
 [profile.release]
 codegen-units = 1

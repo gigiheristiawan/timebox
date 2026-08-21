@@ -16,6 +16,11 @@ runbook is now the procedure for the *next* release.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-21 15:20 | §7.3: **ITMS-91109** — the provisioning profile carries `com.apple.quarantine` from the browser download, and `cp` preserves it; one quarantined file rejects the whole submission, reported only by email ~20 min after a *successful* upload. `build-mas.sh` now runs `xattr -cr` before signing and asserts none survives. Also: `CFBundleVersion` must increase on every upload, a failed delivery included. |
+| 2026-08-21 14:00 | **Correction to §7.3:** the MAS .pkg cannot be installed and launched locally — Gatekeeper rejects the 3rd Party Mac Developer signature and the profile authorises no devices, so `open` fails with a launchd spawn error. The previous "install the .pkg, then check the container" instruction was wrong. `scripts/sandbox-smoketest.sh` added for local sandbox verification, and the installer's bundle-relocation trap recorded. |
+| 2026-08-21 09:35 | §7.1: the 0.1.0 `LaunchAgents/TimeBox.plist` is deleted at startup — an upgrade-path bug, since every 0.1.0 user who enabled launch-at-login has one and nothing else would remove it. |
+| 2026-08-21 09:10 | §7.1: recorded that `SMAppService` can refuse where the LaunchAgent plist could not, and the reconcile-at-launch + `launchAtLoginActive` handling that makes the refusal visible instead of silent. |
+| 2026-08-20 22:30 | **§7 added — Mac App Store**, a second channel beside the DMG. Records the three source changes that made it possible (private API dropped, `SMAppService` login item, `RunEvent::Reopen`), the one-time certificates/profile setup, `scripts/build-mas.sh`, and that the sandboxed build starts with an empty database because its container path differs. |
 | 2026-08-20 20:55 | **§3 redacted for the public repo:** the App Store Connect Key ID and Issuer ID are replaced by `<key-id>` / `<issuer-id>` placeholders — the Issuer ID is account-wide, not per-project, so it does not belong in a public repository. Real values live in `~/.secrets/` next to the `.p8`. Note that both appear in commits before this one; history was not rewritten. |
 | 2026-08-20 18:10 | §6: `--notes-file docs/release-notes/0.1.0.md` restored to the release command now that the file exists, and the one-file-per-release convention recorded. |
 | 2026-08-20 17:30 | **`tauri build` notarizes the `.app` but not the DMG** — observed on the first Developer ID build: app `Notarized Developer ID` and stapled, DMG `Unnotarized Developer ID` with no ticket. §3 now carries the `notarytool submit` + `stapler staple` step for the container, and verification moved to `scripts/verify-release.sh`, which checks stapling on **both** artifacts. |
@@ -459,3 +464,198 @@ Everything the page loads must live **under `docs/`** — the repo root is not t
 site root. The icon it shows is vendored at `docs/assets/icon-256.png` for that
 reason; a path reaching up into `src-tauri/icons/` renders locally and 404s once
 published. Screenshots and the tray marks are already relative and fine.
+
+---
+
+## 7. Mac App Store
+
+A second distribution channel, alongside the Developer ID DMG of §2–§3 — not a
+replacement. Same source, different packaging: the App Store build is
+**sandboxed**, so its database lives in
+`~/Library/Containers/xyz.gigiheristiawan.timebox/Data/Library/Application Support/`
+and an existing DMG user's data is invisible to it. That is accepted for now
+(0.1.0, few users) and must be said in the store description.
+
+```bash
+./scripts/build-mas.sh
+```
+
+Everything below is what that script does and why, plus the one-time account
+setup it cannot do for you.
+
+### 7.1 What had to change in the source
+
+Three things made the app un-shippable to the store; all three are fixed in
+`main`, so the DMG build and the store build come from the same tree.
+
+| Was | Why it fails review or the sandbox | Now |
+| --- | --- | --- |
+| `tauri` feature `macos-private-api`, `popover.transparent(true)` | Reaches the WKWebView background through a private key. Private API is an automatic rejection. | `platform/window_corners.rs` — `setOpaque:NO`, clear window colour, and a corner radius on the content view's layer. All public AppKit, same rounded card. |
+| `tauri-plugin-autostart` (`MacosLauncher::LaunchAgent`) | Writes `~/Library/LaunchAgents/…`, outside the container. The sandbox denies it and the toggle silently does nothing. | `platform/login_item.rs` — `SMAppService.mainApp` (macOS 13+, matching `minimumSystemVersion`). |
+| `tauri-plugin-single-instance` reopening the popover | Binds a Unix socket at `/tmp/…`, which the sandbox denies. | Still present for the DMG build; `RunEvent::Reopen` in `lib.rs` covers the same behaviour and is what a store-installed bundle actually gets, since Launch Services reopens a bundle rather than starting a second copy. |
+
+`SMAppService.mainApp` **raises an Objective-C exception when the process is not
+in a bundle** — and Rust cannot catch it, so the app aborts. `login_item.rs`
+guards on `NSBundle.mainBundle.bundleIdentifier` for that reason: under
+`tauri:dev` the toggle logs a refusal instead of killing the app. Do not remove
+the guard, and do not expect launch-at-login to work in a dev build.
+
+`SMAppService` can also **refuse**, which the plist it replaced never could: it
+wants the app signed and installed in `/Applications`. `login_item::reconcile`
+therefore runs on every launch, not only when the setting is edited, and the
+snapshot carries `launchAtLoginActive` so the settings toggle reports what macOS
+actually did. Expect the toggle to show its refusal note in any build running
+from `target/` — that is correct behaviour, not a bug.
+
+**Upgrading from 0.1.0 leaves a booby trap.** That build used
+`tauri-plugin-autostart`, which wrote `~/Library/LaunchAgents/TimeBox.plist`
+with `RunAtLoad`. The new code registers through `SMAppService` and has no
+knowledge of that file, so without cleanup a user would have two independent
+launch-at-login mechanisms — and turning the setting *off* would unregister the
+service while the plist kept starting the app. `login_item::remove_legacy_launch_agent()`
+runs at startup to delete it, gated on the plist actually pointing at a
+`TimeBox.app`. Sandboxed builds no-op there, which is correct: a store install
+never had the file.
+
+`Info.plist` gained `ITSAppUsesNonExemptEncryption=false` — without it App Store
+Connect asks the export-compliance question on every single upload.
+
+### 7.2 One-time account setup
+
+None of this is scriptable; do it once at developer.apple.com and App Store
+Connect.
+
+1. **Register the bundle ID** `xyz.gigiheristiawan.timebox` (Identifiers → App
+   IDs → macOS). It is not registered by the Developer ID build — that one never
+   needed an App ID.
+2. **Two new certificates**, neither of which is the Developer ID Application
+   cert §3 talks about:
+   - `3rd Party Mac Developer Application` — signs the .app
+   - `3rd Party Mac Developer Installer` — signs the .pkg
+3. **A Mac App Store provisioning profile** for that App ID, downloaded to
+   `~/.secrets/timebox_mas.provisionprofile` (or point `PROVISION_PROFILE` at it).
+   The script embeds it as `Contents/embedded.provisionprofile`; without it the
+   store rejects the upload and the installed app refuses to launch.
+4. **A new app record** in App Store Connect: category (Productivity),
+   description, screenshots (1280×800 or 1440×900), and a privacy label — TimeBox
+   collects nothing, which is the shortest form of that questionnaire.
+
+`entitlements.mas.plist` carries `TEAM_ID_PLACEHOLDER` rather than the real Team
+ID; `build-mas.sh` substitutes `$TEAM_ID` at signing time and then verifies the
+substituted `application-identifier` matches the bundle identifier, so a
+mismatched profile fails locally instead of after a 20-minute upload.
+
+### 7.3 Verifying before upload
+
+`scripts/verify-release.sh` checks notarization and stapling — **neither applies
+here**. App Store builds are not notarized by you; the store does its own
+processing. What matters instead:
+
+```bash
+codesign -d --entitlements - --xml target-mas/TimeBox.app | grep app-sandbox
+lipo -archs target-mas/TimeBox.app/Contents/MacOS/TimeBox   # x86_64 arm64
+```
+
+The script asserts both.
+
+### The .pkg cannot be run locally — do not try
+
+A Mac App Store build launches only where the Mac App Store installed it.
+Installing the .pkg by hand and opening the app fails:
+
+```
+open /Applications/TimeBox.app
+# Launch failed. … NSPOSIXErrorDomain Code=163 "Launchd job spawn failed"
+```
+
+Nothing is wrong with the build when that happens. The signature verifies and
+satisfies its Designated Requirement; what fails is authorisation:
+
+```bash
+spctl -a -vvv -t exec /Applications/TimeBox.app     # rejected
+```
+
+Gatekeeper accepts Developer ID + notarized, or apps the store installed —
+a `3rd Party Mac Developer Application` signature is neither. And a Mac App
+Store provisioning profile carries no `ProvisionedDevices`, so no Mac is
+authorised. The .pkg is an **upload artifact, not an installable build**.
+
+### Local sandbox verification instead
+
+```bash
+./scripts/sandbox-smoketest.sh
+```
+
+It re-signs the same bundle with the **Developer ID** identity and the sandbox
+entitlement alone, which does run locally. That covers what actually risks a
+rejection — container creation, SQLite, notifications, the global shortcut, and
+launch-at-login through `SMAppService`, which no dev build can test because an
+unbundled binary is refused. It does not cover the MAS provisioning path; use
+**TestFlight for macOS** after uploading for that.
+
+### Quarantine will reject the submission, silently and late
+
+The provisioning profile is downloaded through a browser, so it carries
+`com.apple.quarantine`, and `cp` preserves extended attributes. Apple rejects
+any submission containing a quarantined file:
+
+```
+ITMS-91109: Invalid package contents - The package contains one or more files
+with the com.apple.quarantine extended file attribute, such as
+"…/TimeBox.app/Contents/embedded.provisionprofile".
+```
+
+What makes this expensive is *when* you find out. `altool --validate-app`
+passes. `altool --upload-app` reports **UPLOAD SUCCEEDED**. The rejection
+arrives by email around twenty minutes later, and the build never appears in
+App Store Connect at all — so the obvious reading, that it is still processing,
+is wrong.
+
+`build-mas.sh` now runs `xattr -cr` on the staged bundle **before** signing and
+fails the build if any quarantined file survives. The ordering matters:
+`codesign` keeps signatures for some file types in extended attributes, so
+clearing them afterwards would invalidate the signature it just wrote.
+
+`com.apple.provenance` remains on most files afterwards. macOS re-adds it and
+Apple does not reject it; only quarantine is prohibited.
+
+### Every upload needs a higher CFBundleVersion
+
+Including one that failed processing — the delivery is registered even when the
+build is rejected. Tauri derives both version keys from `version` in
+`tauri.conf.json`, so `CFBundleVersion` is overridden in `src-tauri/Info.plist`
+and **must be bumped by hand for each submission**. `CFBundleShortVersionString`
+stays at the marketing version.
+
+Build 1 (`0.1.0`) was rejected for quarantine; build 2 is the first accepted one.
+
+### The installer will hide your app somewhere else
+
+`productbuild --component` marks the bundle relocatable, so Installer searches
+the disk for an existing bundle with the same `CFBundleIdentifier` and installs
+over *that* instead of `/Applications`:
+
+```
+PackageKit: Applications/TimeBox.app relocated to
+  …/src-tauri/target/universal-apple-darwin/release/bundle/macos/TimeBox.app
+```
+
+Any previous build output is a candidate, so this fires almost every time. It
+does not affect real store users — the Mac App Store installs apps directly,
+never through Installer.app. If you install the .pkg by hand anyway, delete the
+other bundles first, and note that a relocated install leaves them **root-owned**,
+so a second attempt needs `sudo rm -rf`. Check where it actually went with:
+
+```bash
+grep -i relocated /var/log/install.log | tail -2
+```
+
+### 7.4 Review risks worth pre-empting
+
+- **The checkpoint has no exit** (SPEC D14) — that is the product, not a bug, but
+  a reviewer will try to dismiss it. `Cmd+Q` and the quit-confirm still work, so
+  the app is never unquittable. Say so in the review notes.
+- **Menu bar only** (`LSUIElement`) — reviewers have opened a rejection on "the
+  app does nothing when I launch it" before. Review notes should say the icon is
+  in the menu bar and `Cmd+Shift+T` opens the popover.
+- **1-minute `TEMPORARY` durations** — `grep -r TEMPORARY src/` must be empty.

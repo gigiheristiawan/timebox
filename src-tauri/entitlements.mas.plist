@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Mandatory for the Mac App Store. TimeBox needs nothing beyond it:
+         no network, no file access outside its container, no shell, no
+         hardware. The database lives in the container's Application Support. -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- Required by WKWebView, not by TimeBox. WebKit's WebContent and
+         Networking processes do not spawn inside the sandbox without it, and a
+         webview with no renderer paints a blank window: the app runs, the
+         backend is fine, and nothing is denied in the log. TimeBox itself makes
+         no outbound connection — there is no network code in the app. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Both are required in a Mac App Store submission and must match the
+         provisioning profile. <team-id> is substituted by scripts/build-mas.sh. -->
+    <key>com.apple.application-identifier</key>
+    <string>TEAM_ID_PLACEHOLDER.xyz.gigiheristiawan.timebox</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>TEAM_ID_PLACEHOLDER</string>
+</dict>
+</plist>

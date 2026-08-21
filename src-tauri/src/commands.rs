@@ -25,14 +25,26 @@ pub struct Snapshot {
     /// Settings ride along for the same reason: one channel, no second store
     /// for the UI to keep in sync.
     pub settings: Settings,
+    /// Whether macOS *actually* has the login item registered, which is not the
+    /// same question as `settings.launch_at_login` — that is what the user
+    /// asked for. They disagree when registration was refused, or when the item
+    /// was switched off in System Settings. The UI says so rather than showing
+    /// a toggle that lies.
+    pub launch_at_login_active: bool,
 }
 
 fn snapshot_of(app: &App) -> Snapshot {
     let now = now_ms();
     let state = app.snapshot();
     let settings = app.settings();
+    #[cfg(target_os = "macos")]
+    let launch_at_login_active = crate::platform::login_item::is_active();
+    #[cfg(not(target_os = "macos"))]
+    let launch_at_login_active = settings.launch_at_login;
+
     Snapshot {
         remaining_ms: state.remaining_ms(now),
+        launch_at_login_active,
         staleness_ms: state.staleness_ms(now),
         summary: summarize(&state, day_start_ms(now), now, settings.available_work_ms_per_day),
         settings,
@@ -147,14 +159,11 @@ pub fn update_settings(
 }
 
 /// Best-effort: a login item that cannot be registered must not fail the save.
-/// The switch reflects the stored preference; a failure is logged, not hidden.
-fn apply_launch_at_login(handle: &tauri::AppHandle, on: bool) {
-    use tauri_plugin_autostart::ManagerExt;
-    let mgr = handle.autolaunch();
-    let result = if on { mgr.enable() } else { mgr.disable() };
-    if let Err(e) = result {
-        eprintln!("[timebox] launch at login could not be {}: {e}", if on { "enabled" } else { "disabled" });
-    }
+/// The snapshot carries what the system really did, so the failure is visible
+/// in the UI rather than only in the log.
+fn apply_launch_at_login(_handle: &tauri::AppHandle, on: bool) {
+    #[cfg(target_os = "macos")]
+    crate::platform::login_item::reconcile(on);
 }
 
 // --------------------------------------------------------- window plumbing

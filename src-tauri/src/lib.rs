@@ -25,10 +25,6 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
-        ))
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let db = Db::open(&dir)?;
@@ -38,6 +34,19 @@ pub fn run() {
             // appear as a checkpoint, never as a running or reset timer.
             let state = state::App::hydrate(db, state::now_ms())?;
             platform::tray::set_show_timer(state.settings().menu_bar_show_timer);
+
+            // The login item is system state, not ours, and it can drift from
+            // the stored preference — the user disables it in System Settings,
+            // or the app was moved into /Applications after the toggle was set.
+            // Reconciling here is the only thing that ever notices.
+            // Before reconciling: 0.1.0 registered launch-at-login by writing a
+            // LaunchAgent plist, which would otherwise keep starting the app
+            // behind the setting's back.
+            #[cfg(target_os = "macos")]
+            {
+                platform::login_item::remove_legacy_launch_agent();
+                platform::login_item::reconcile(state.settings().launch_at_login);
+            }
 
             platform::tray::init(app.handle())?;
             platform::tray::refresh(app.handle(), &state.snapshot(), state::now_ms());
@@ -103,6 +112,14 @@ pub fn run() {
         // Quit item. `handle.exit(0)` carries a code, which is how an answered
         // confirm gets through without re-asking.
         .run(|app, event| {
+            // Launch Services will not start a second copy of an installed
+            // bundle; it reopens the running one. That path is what a sandboxed
+            // build gets instead of `single-instance`, whose /tmp socket the
+            // sandbox denies — so the popover has to be reachable from here
+            // too (D12, acceptance test 21).
+            if let tauri::RunEvent::Reopen { .. } = &event {
+                platform::popover::show(app);
+            }
             if let tauri::RunEvent::ExitRequested { api, code: None, .. } = &event {
                 let running = app
                     .try_state::<std::sync::Arc<state::App>>()

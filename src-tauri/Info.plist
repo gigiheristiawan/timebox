@@ -5,5 +5,26 @@
     <!-- Menu bar utility: no Dock icon, no app-switcher entry. -->
     <key>LSUIElement</key>
     <true/>
+
+    <!-- No encryption beyond what macOS itself provides. Without this key the
+         App Store asks the export-compliance question on every upload. -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+
+    <!-- Required by App Store validation (error 90242); a build without it is
+         rejected before it ever reaches review. Set here as well as via
+         `bundle.category` in tauri.conf.json so the value cannot go missing
+         if the generated plist changes. -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+
+    <!-- The build number, which is NOT the marketing version. Tauri derives
+         both from `version` in tauri.conf.json, but App Store Connect requires
+         this one to increase on every upload — including after a build that
+         failed processing, since the delivery is still registered. Bump it for
+         each submission; CFBundleShortVersionString stays 0.1.0.
+         Build 1 (0.1.0) was rejected: ITMS-91109, quarantine xattr. -->
+    <key>CFBundleVersion</key>
+    <string>2</string>
 </dict>
 </plist>

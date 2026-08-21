@@ -101,6 +101,9 @@ export interface Snapshot {
   stalenessMs: number | null;
   summary: Summary;
   settings: Settings;
+  /** Whether macOS actually has the login item registered. Not the same as
+   *  `settings.launchAtLogin`, which is only what the user asked for. */
+  launchAtLoginActive: boolean;
 }
 
 export interface HealthReport {
