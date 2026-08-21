@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Mandatory for the Mac App Store. TimeBox needs nothing beyond it:
+         no network, no file access outside its container, no shell, no
+         hardware. The database lives in the container's Application Support. -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- Both are required in a Mac App Store submission and must match the
+         provisioning profile. <team-id> is substituted by scripts/build-mas.sh. -->
+    <key>com.apple.application-identifier</key>
+    <string>TEAM_ID_PLACEHOLDER.xyz.gigiheristiawan.timebox</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>TEAM_ID_PLACEHOLDER</string>
+</dict>
+</plist>

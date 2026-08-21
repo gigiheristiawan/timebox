@@ -5,5 +5,10 @@
     <!-- Menu bar utility: no Dock icon, no app-switcher entry. -->
     <key>LSUIElement</key>
     <true/>
+
+    <!-- No encryption beyond what macOS itself provides. Without this key the
+         App Store asks the export-compliance question on every upload. -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
 </dict>
 </plist>

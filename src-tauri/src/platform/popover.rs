@@ -81,12 +81,16 @@ fn open(app: &AppHandle) -> tauri::Result<()> {
                 .minimizable(false)
                 .maximizable(false)
                 .shadow(true)
-                // The card has rounded corners, so the window behind them must
-                // not paint. Requires `macos-private-api`.
-                .transparent(true)
                 .inner_size(WIDTH, HEIGHT)
                 .visible(false)
                 .build()?;
+
+            // The card has rounded corners, so the window behind them must not
+            // paint square ones. Done through the content view's layer rather
+            // than `.transparent(true)`, which needs `macos-private-api` and
+            // would rule out the Mac App Store.
+            #[cfg(target_os = "macos")]
+            super::window_corners::round(&w);
 
             // Click-outside dismissal. Without it the popover would linger over
             // whatever the user switched to, which is not what a menu bar item

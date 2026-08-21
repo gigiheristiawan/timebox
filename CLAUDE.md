@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Date (WIB)       | Change                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-08-20 22:30 | **Mac App Store prep:** `macos-private-api` and `tauri-plugin-autostart` removed. Popover corners now come from `platform/window_corners.rs`, launch-at-login from `platform/login_item.rs` (`SMAppService`). See `docs/RELEASE.md` §7. |
 | 2026-08-20 14:40 | Tray icon is now the exported asset `icons/tray.png` (tauri feature `image-png` enabled to decode it), not drawn in `tray.rs`. |
 | 2026-08-20 14:10 | App icon is now **exported artwork**, not script output. `icons/generate.py` is superseded and must not be re-run; regenerate with `npm run tauri icon`. Supersedes the icon gotcha dated 2026-08-19 21:52. |
 | 2026-08-20 01:20 | Phase 7: added `core/summary.rs` and `db/settings.rs` to the layer map; noted migration 002 and the settings-on-the-snapshot shape. |
@@ -179,7 +180,9 @@ core/           pure reducer + queue ops + model + menubar/summary  (no I/O)
 db/             rusqlite; repo.rs snapshots whole state in one transaction;
                 settings.rs reads/writes the single settings row
 state.rs        App: hydrate, dispatch, the tick thread, cached settings
-platform/       checkpoint, popover, tray, quit-confirm windows
+platform/       checkpoint, popover, tray, quit-confirm windows;
+                login_item (SMAppService) and window_corners (rounded popover),
+                both raw AppKit via objc2 — see the App Store note below
 commands.rs     the entire IPC surface: get_snapshot, dispatch, update_settings,
                 window plumbing, health_check
 ```
@@ -224,6 +227,25 @@ Each is enforced and tested; changing one changes what the product is.
 - **`docs/RELEASE.md`** is the release runbook — icon regeneration, universal build, signing, notarization, and the performance check, with the exact commands.
 - **`docs/mockup.html`** is the interactive design reference — the real product logic in a single HTML file. Useful for checking intended interaction before building a component.
 - Rust test names match spec test numbers (`t14_return_resumes_the_remainder`), so a failure names its requirement.
+
+### No private API — the App Store constraint
+
+The app is built to be shippable to the Mac App Store as well as by DMG, so
+**nothing may use a private API and nothing may write outside the sandbox
+container.** Two places would have, and were deliberately replaced:
+
+- `platform/window_corners.rs` rounds the popover through `setOpaque:NO` plus a
+  corner radius on the content view's layer. Do **not** reintroduce
+  `transparent(true)` / the `macos-private-api` feature to get the same effect.
+- `platform/login_item.rs` registers the login item with `SMAppService` rather
+  than `tauri-plugin-autostart`, which writes into `~/Library/LaunchAgents`.
+  `SMAppService.mainApp` *aborts the process* when the binary is not in a
+  bundle, so the module guards on `NSBundle.mainBundle.bundleIdentifier`; that
+  guard is what makes `tauri:dev` survive the toggle.
+
+`tauri-plugin-single-instance` stays for the DMG build even though its `/tmp`
+socket is sandbox-illegal; `RunEvent::Reopen` in `lib.rs` covers the same
+"second launch shows the popover" behaviour where the plugin cannot.
 
 ## Gotchas
 

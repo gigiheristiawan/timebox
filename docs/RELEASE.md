@@ -16,6 +16,7 @@ runbook is now the procedure for the *next* release.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-20 22:30 | **§7 added — Mac App Store**, a second channel beside the DMG. Records the three source changes that made it possible (private API dropped, `SMAppService` login item, `RunEvent::Reopen`), the one-time certificates/profile setup, `scripts/build-mas.sh`, and that the sandboxed build starts with an empty database because its container path differs. |
 | 2026-08-20 20:55 | **§3 redacted for the public repo:** the App Store Connect Key ID and Issuer ID are replaced by `<key-id>` / `<issuer-id>` placeholders — the Issuer ID is account-wide, not per-project, so it does not belong in a public repository. Real values live in `~/.secrets/` next to the `.p8`. Note that both appear in commits before this one; history was not rewritten. |
 | 2026-08-20 18:10 | §6: `--notes-file docs/release-notes/0.1.0.md` restored to the release command now that the file exists, and the one-file-per-release convention recorded. |
 | 2026-08-20 17:30 | **`tauri build` notarizes the `.app` but not the DMG** — observed on the first Developer ID build: app `Notarized Developer ID` and stapled, DMG `Unnotarized Developer ID` with no ticket. §3 now carries the `notarytool submit` + `stapler staple` step for the container, and verification moved to `scripts/verify-release.sh`, which checks stapling on **both** artifacts. |
@@ -459,3 +460,91 @@ Everything the page loads must live **under `docs/`** — the repo root is not t
 site root. The icon it shows is vendored at `docs/assets/icon-256.png` for that
 reason; a path reaching up into `src-tauri/icons/` renders locally and 404s once
 published. Screenshots and the tray marks are already relative and fine.
+
+---
+
+## 7. Mac App Store
+
+A second distribution channel, alongside the Developer ID DMG of §2–§3 — not a
+replacement. Same source, different packaging: the App Store build is
+**sandboxed**, so its database lives in
+`~/Library/Containers/xyz.gigiheristiawan.timebox/Data/Library/Application Support/`
+and an existing DMG user's data is invisible to it. That is accepted for now
+(0.1.0, few users) and must be said in the store description.
+
+```bash
+./scripts/build-mas.sh
+```
+
+Everything below is what that script does and why, plus the one-time account
+setup it cannot do for you.
+
+### 7.1 What had to change in the source
+
+Three things made the app un-shippable to the store; all three are fixed in
+`main`, so the DMG build and the store build come from the same tree.
+
+| Was | Why it fails review or the sandbox | Now |
+| --- | --- | --- |
+| `tauri` feature `macos-private-api`, `popover.transparent(true)` | Reaches the WKWebView background through a private key. Private API is an automatic rejection. | `platform/window_corners.rs` — `setOpaque:NO`, clear window colour, and a corner radius on the content view's layer. All public AppKit, same rounded card. |
+| `tauri-plugin-autostart` (`MacosLauncher::LaunchAgent`) | Writes `~/Library/LaunchAgents/…`, outside the container. The sandbox denies it and the toggle silently does nothing. | `platform/login_item.rs` — `SMAppService.mainApp` (macOS 13+, matching `minimumSystemVersion`). |
+| `tauri-plugin-single-instance` reopening the popover | Binds a Unix socket at `/tmp/…`, which the sandbox denies. | Still present for the DMG build; `RunEvent::Reopen` in `lib.rs` covers the same behaviour and is what a store-installed bundle actually gets, since Launch Services reopens a bundle rather than starting a second copy. |
+
+`SMAppService.mainApp` **raises an Objective-C exception when the process is not
+in a bundle** — and Rust cannot catch it, so the app aborts. `login_item.rs`
+guards on `NSBundle.mainBundle.bundleIdentifier` for that reason: under
+`tauri:dev` the toggle logs a refusal instead of killing the app. Do not remove
+the guard, and do not expect launch-at-login to work in a dev build.
+
+`Info.plist` gained `ITSAppUsesNonExemptEncryption=false` — without it App Store
+Connect asks the export-compliance question on every single upload.
+
+### 7.2 One-time account setup
+
+None of this is scriptable; do it once at developer.apple.com and App Store
+Connect.
+
+1. **Register the bundle ID** `xyz.gigiheristiawan.timebox` (Identifiers → App
+   IDs → macOS). It is not registered by the Developer ID build — that one never
+   needed an App ID.
+2. **Two new certificates**, neither of which is the Developer ID Application
+   cert §3 talks about:
+   - `3rd Party Mac Developer Application` — signs the .app
+   - `3rd Party Mac Developer Installer` — signs the .pkg
+3. **A Mac App Store provisioning profile** for that App ID, downloaded to
+   `~/.secrets/timebox_mas.provisionprofile` (or point `PROVISION_PROFILE` at it).
+   The script embeds it as `Contents/embedded.provisionprofile`; without it the
+   store rejects the upload and the installed app refuses to launch.
+4. **A new app record** in App Store Connect: category (Productivity),
+   description, screenshots (1280×800 or 1440×900), and a privacy label — TimeBox
+   collects nothing, which is the shortest form of that questionnaire.
+
+`entitlements.mas.plist` carries `TEAM_ID_PLACEHOLDER` rather than the real Team
+ID; `build-mas.sh` substitutes `$TEAM_ID` at signing time and then verifies the
+substituted `application-identifier` matches the bundle identifier, so a
+mismatched profile fails locally instead of after a 20-minute upload.
+
+### 7.3 Verifying before upload
+
+`scripts/verify-release.sh` checks notarization and stapling — **neither applies
+here**. App Store builds are not notarized by you; the store does its own
+processing. What matters instead:
+
+```bash
+codesign -d --entitlements - --xml target-mas/TimeBox.app | grep app-sandbox
+lipo -archs target-mas/TimeBox.app/Contents/MacOS/TimeBox   # x86_64 arm64
+```
+
+The script asserts both. The app **cannot be launched from `target-mas/`** — a
+Mac App Store profile only authorises the installed copy. To smoke-test, install
+the .pkg and confirm `~/Library/Containers/xyz.gigiheristiawan.timebox/` appears.
+
+### 7.4 Review risks worth pre-empting
+
+- **The checkpoint has no exit** (SPEC D14) — that is the product, not a bug, but
+  a reviewer will try to dismiss it. `Cmd+Q` and the quit-confirm still work, so
+  the app is never unquittable. Say so in the review notes.
+- **Menu bar only** (`LSUIElement`) — reviewers have opened a rejection on "the
+  app does nothing when I launch it" before. Review notes should say the icon is
+  in the menu bar and `Cmd+Shift+T` opens the popover.
+- **1-minute `TEMPORARY` durations** — `grep -r TEMPORARY src/` must be empty.

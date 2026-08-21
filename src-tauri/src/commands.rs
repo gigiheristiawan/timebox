@@ -148,11 +148,9 @@ pub fn update_settings(
 
 /// Best-effort: a login item that cannot be registered must not fail the save.
 /// The switch reflects the stored preference; a failure is logged, not hidden.
-fn apply_launch_at_login(handle: &tauri::AppHandle, on: bool) {
-    use tauri_plugin_autostart::ManagerExt;
-    let mgr = handle.autolaunch();
-    let result = if on { mgr.enable() } else { mgr.disable() };
-    if let Err(e) = result {
+fn apply_launch_at_login(_handle: &tauri::AppHandle, on: bool) {
+    #[cfg(target_os = "macos")]
+    if let Err(e) = crate::platform::login_item::set(on) {
         eprintln!("[timebox] launch at login could not be {}: {e}", if on { "enabled" } else { "disabled" });
     }
 }
