@@ -13,9 +13,16 @@
 use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// `SMAppServiceStatusEnabled`.
 const STATUS_ENABLED: isize = 1;
+
+/// What the system last told us, cached because the snapshot is rebuilt every
+/// second while a block runs and `status` crosses an XPC boundary to the
+/// background-task daemon. Written only by `reconcile`, which is the only place
+/// the answer can change.
+static ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// `+[SMAppService mainApp]` — the service representing this bundle.
 ///
@@ -78,12 +85,10 @@ pub fn set(enabled: bool) -> Result<(), String> {
     }
 }
 
-/// Whether the system currently has the login item enabled.
+/// Whether the system currently has the login item enabled — a live query.
 ///
-/// The stored setting is what the UI shows; this exists so a caller can see
-/// that the system disagrees (the user can turn the item off in System
-/// Settings, which never reaches us).
-#[allow(dead_code)]
+/// The user can turn the item off in System Settings, which never reaches us,
+/// so the stored preference is a wish and this is the fact.
 pub fn is_enabled() -> bool {
     match main_app() {
         Some(service) => {
@@ -92,6 +97,83 @@ pub fn is_enabled() -> bool {
         }
         None => false,
     }
+}
+
+/// The cached answer to `is_enabled`, for callers on a hot path.
+pub fn is_active() -> bool {
+    ACTIVE.load(Ordering::Relaxed)
+}
+
+/// Make the system agree with the stored preference, and record what it
+/// actually says afterwards.
+///
+/// Called on every launch, not only when the setting changes. `SMAppService`
+/// refuses an app that is not installed in `/Applications`, so a user who
+/// enables the toggle from `~/Downloads` and *later* moves the app would
+/// otherwise never get registered — the preference did not change, so nothing
+/// would retry. Reconciling at startup is what closes that gap.
+pub fn reconcile(desired: bool) {
+    if is_enabled() != desired {
+        if let Err(e) = set(desired) {
+            eprintln!(
+                "[timebox] launch at login could not be {}: {e}",
+                if desired { "enabled" } else { "disabled" }
+            );
+        }
+    }
+    // Re-read rather than assume: a failed `set` must leave the cache showing
+    // what is true, or the UI would report a login item that does not exist.
+    ACTIVE.store(is_enabled(), Ordering::Relaxed);
+}
+
+// ------------------------------------------- migration away from the plist
+
+/// `tauri-plugin-autostart` labelled its job with the product name, so the file
+/// it wrote is `~/Library/LaunchAgents/TimeBox.plist`.
+const LEGACY_LAUNCH_AGENT: &str = "Library/LaunchAgents/TimeBox.plist";
+
+/// Delete the launch agent that 0.1.0 installed, if it is ours.
+///
+/// Every user who enabled launch at login before this build has that file, and
+/// nothing else will ever remove it: the new code registers through
+/// `SMAppService` and has no idea the plist exists. Left in place it launches
+/// the app at login *independently* of the setting — so turning the toggle off
+/// would unregister the service, leave the plist running, and report "off"
+/// while the app still starts itself. That is worse than the bug this module
+/// was written to fix.
+///
+/// Removing the file is enough. `RunAtLoad` fires when launchd loads the job at
+/// login; with the file gone there is nothing to load next time, and the
+/// already-loaded job does not relaunch anything on its own.
+///
+/// Silently does nothing in a sandboxed build — `~/Library/LaunchAgents` is
+/// outside the container. That is correct: a Mac App Store install is a fresh
+/// install and never had the plist.
+pub fn remove_legacy_launch_agent() {
+    let Ok(home) = std::env::var("HOME") else {
+        return;
+    };
+    let path = std::path::Path::new(&home).join(LEGACY_LAUNCH_AGENT);
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return; // absent, unreadable, or sandboxed away — all the same to us
+    };
+    if !is_ours(&contents) {
+        eprintln!("[timebox] left {} alone: not ours", path.display());
+        return;
+    }
+    match std::fs::remove_file(&path) {
+        Ok(()) => eprintln!("[timebox] removed the 0.1.0 launch agent; login at start is now SMAppService's job"),
+        Err(e) => eprintln!("[timebox] could not remove {}: {e}", path.display()),
+    }
+}
+
+/// Whether a launch agent found at that path was written for *this* app.
+///
+/// The filename alone is not enough to justify deleting a file out of the
+/// user's `LaunchAgents` directory — anything could be called `TimeBox.plist`.
+/// The program it runs is the evidence.
+fn is_ours(contents: &str) -> bool {
+    contents.contains("TimeBox.app/Contents/MacOS/timebox")
 }
 
 #[cfg(test)]
@@ -104,5 +186,41 @@ mod tests {
         assert!(!super::is_bundled());
         assert!(super::set(true).is_err());
         assert!(!super::is_enabled());
+    }
+
+    /// The point of the cache is that the UI can trust it. A registration the
+    /// system refused must not leave it claiming success, or the settings
+    /// toggle would show a login item that will never run.
+    #[test]
+    fn a_refused_registration_is_not_cached_as_active() {
+        super::reconcile(true);
+        assert!(!super::is_active());
+    }
+
+    /// Exactly what 0.1.0's `tauri-plugin-autostart` wrote.
+    const LEGACY: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>Label</key><string>TimeBox</string>
+  <key>ProgramArguments</key>
+  <array><string>/Applications/TimeBox.app/Contents/MacOS/timebox</string></array>
+  <key>RunAtLoad</key><true/>
+</dict></plist>"#;
+
+    #[test]
+    fn the_0_1_0_launch_agent_is_recognised() {
+        assert!(super::is_ours(LEGACY));
+    }
+
+    /// The filename is not evidence. Deleting a file out of the user's
+    /// LaunchAgents directory because it happens to be called TimeBox.plist
+    /// would be destroying someone else's job on a name collision.
+    #[test]
+    fn a_foreign_launch_agent_of_the_same_name_is_left_alone() {
+        let foreign = LEGACY.replace(
+            "/Applications/TimeBox.app/Contents/MacOS/timebox",
+            "/usr/local/bin/some-other-timebox",
+        );
+        assert!(!super::is_ours(&foreign));
+        assert!(!super::is_ours(""));
     }
 }

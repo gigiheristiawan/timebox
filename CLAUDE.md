@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Date (WIB)       | Change                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-08-21 09:35 | Startup now deletes 0.1.0's leftover `~/Library/LaunchAgents/TimeBox.plist` — it would otherwise keep launching the app behind the setting's back. |
+| 2026-08-21 09:10 | Login item is **reconciled at every launch**, not only on a settings edit, and the snapshot carries `launchAtLoginActive` — what macOS actually did, versus what the user asked for. |
 | 2026-08-20 22:30 | **Mac App Store prep:** `macos-private-api` and `tauri-plugin-autostart` removed. Popover corners now come from `platform/window_corners.rs`, launch-at-login from `platform/login_item.rs` (`SMAppService`). See `docs/RELEASE.md` §7. |
 | 2026-08-20 14:40 | Tray icon is now the exported asset `icons/tray.png` (tauri feature `image-png` enabled to decode it), not drawn in `tray.rs`. |
 | 2026-08-20 14:10 | App icon is now **exported artwork**, not script output. `icons/generate.py` is superseded and must not be re-run; regenerate with `npm run tauri icon`. Supersedes the icon gotcha dated 2026-08-19 21:52. |
@@ -242,6 +244,22 @@ container.** Two places would have, and were deliberately replaced:
   `SMAppService.mainApp` *aborts the process* when the binary is not in a
   bundle, so the module guards on `NSBundle.mainBundle.bundleIdentifier`; that
   guard is what makes `tauri:dev` survive the toggle.
+
+  Unlike the plist it replaced, `SMAppService` can **refuse** — it wants the app
+  signed and in `/Applications`. So `reconcile` runs on every launch rather than
+  only when the setting changes (a user who toggles it on from `~/Downloads` and
+  later moves the app would otherwise never be registered), and the snapshot
+  carries `launchAtLoginActive` so the toggle shows the system's answer instead
+  of the stored wish. `is_active()` reads a cache; `status` crosses an XPC
+  boundary and the snapshot is rebuilt every second.
+
+  Startup also runs `remove_legacy_launch_agent()`: 0.1.0 shipped
+  `tauri-plugin-autostart`, which wrote `~/Library/LaunchAgents/TimeBox.plist`,
+  and nothing else would ever remove it. Left there it launches the app at login
+  independently of the setting, so switching the toggle *off* would unregister
+  the service and still start the app. It deletes only when the plist's
+  `ProgramArguments` points into a `TimeBox.app` — a filename match is not
+  evidence enough to delete a file out of the user's `LaunchAgents`.
 
 `tauri-plugin-single-instance` stays for the DMG build even though its `/tmp`
 socket is sandbox-illegal; `RunEvent::Reopen` in `lib.rs` covers the same

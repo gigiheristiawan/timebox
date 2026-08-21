@@ -16,6 +16,8 @@ runbook is now the procedure for the *next* release.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-21 09:35 | §7.1: the 0.1.0 `LaunchAgents/TimeBox.plist` is deleted at startup — an upgrade-path bug, since every 0.1.0 user who enabled launch-at-login has one and nothing else would remove it. |
+| 2026-08-21 09:10 | §7.1: recorded that `SMAppService` can refuse where the LaunchAgent plist could not, and the reconcile-at-launch + `launchAtLoginActive` handling that makes the refusal visible instead of silent. |
 | 2026-08-20 22:30 | **§7 added — Mac App Store**, a second channel beside the DMG. Records the three source changes that made it possible (private API dropped, `SMAppService` login item, `RunEvent::Reopen`), the one-time certificates/profile setup, `scripts/build-mas.sh`, and that the sandboxed build starts with an empty database because its container path differs. |
 | 2026-08-20 20:55 | **§3 redacted for the public repo:** the App Store Connect Key ID and Issuer ID are replaced by `<key-id>` / `<issuer-id>` placeholders — the Issuer ID is account-wide, not per-project, so it does not belong in a public repository. Real values live in `~/.secrets/` next to the `.p8`. Note that both appear in commits before this one; history was not rewritten. |
 | 2026-08-20 18:10 | §6: `--notes-file docs/release-notes/0.1.0.md` restored to the release command now that the file exists, and the one-file-per-release convention recorded. |
@@ -495,6 +497,23 @@ in a bundle** — and Rust cannot catch it, so the app aborts. `login_item.rs`
 guards on `NSBundle.mainBundle.bundleIdentifier` for that reason: under
 `tauri:dev` the toggle logs a refusal instead of killing the app. Do not remove
 the guard, and do not expect launch-at-login to work in a dev build.
+
+`SMAppService` can also **refuse**, which the plist it replaced never could: it
+wants the app signed and installed in `/Applications`. `login_item::reconcile`
+therefore runs on every launch, not only when the setting is edited, and the
+snapshot carries `launchAtLoginActive` so the settings toggle reports what macOS
+actually did. Expect the toggle to show its refusal note in any build running
+from `target/` — that is correct behaviour, not a bug.
+
+**Upgrading from 0.1.0 leaves a booby trap.** That build used
+`tauri-plugin-autostart`, which wrote `~/Library/LaunchAgents/TimeBox.plist`
+with `RunAtLoad`. The new code registers through `SMAppService` and has no
+knowledge of that file, so without cleanup a user would have two independent
+launch-at-login mechanisms — and turning the setting *off* would unregister the
+service while the plist kept starting the app. `login_item::remove_legacy_launch_agent()`
+runs at startup to delete it, gated on the plist actually pointing at a
+`TimeBox.app`. Sandboxed builds no-op there, which is correct: a store install
+never had the file.
 
 `Info.plist` gained `ITSAppUsesNonExemptEncryption=false` — without it App Store
 Connect asks the export-compliance question on every single upload.

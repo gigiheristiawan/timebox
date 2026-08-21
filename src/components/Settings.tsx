@@ -38,6 +38,11 @@ export function Settings() {
           label="Launch at login"
           on={s.launchAtLogin}
           onChange={(v) => set({ launchAtLogin: v })}
+          note={
+            s.launchAtLogin && !snap.launchAtLoginActive
+              ? "macOS refused to register it. Move TimeBox to your Applications folder, then switch this off and on again."
+              : undefined
+          }
         />
         <Row label="Theme">
           <select
@@ -144,8 +149,12 @@ function MinuteSelect({
 }
 
 /** `.switch` in docs/mockup.html. */
-function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
+/** `note` carries a reason the switch did not take effect. It is shown only
+ *  when the backend reports that the system disagrees with the setting, so a
+ *  toggle can never sit there claiming something that is not true. */
+function Toggle({ label, on, onChange, note }: { label: string; on: boolean; onChange: (v: boolean) => void; note?: string | undefined }) {
   return (
+    <div className="flex flex-col gap-1">
     <div className="flex items-center gap-2.5 text-[13px]">
       <span className="text-ink-2">{label}</span>
       <button
@@ -164,6 +173,8 @@ function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange:
           }`}
         />
       </button>
+    </div>
+    {note && <p className="text-[11px] leading-snug text-alert">{note}</p>}
     </div>
   );
 }
