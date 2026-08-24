@@ -3,12 +3,13 @@
 How to produce a distributable TimeBox build. Phase 8 of
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Current state:** **0.1.0 is published.** The signed, notarized, stapled
-universal DMG passes every check in `./scripts/verify-release.sh` (app and DMG
-both) and is attached to the [v0.1.0
-release](https://github.com/gigiheristiawan/timebox/releases/tag/v0.1.0); the
-landing page is live at <https://gigiheristiawan.github.io/timebox/>. This
-runbook is now the procedure for the *next* release.
+**Current state:** **0.1.0 is published**, and **0.2.0 is in flight** — version
+bumped, notes written, a signed/notarized/stapled universal DMG verified clean.
+The 0.1.0 DMG is attached to the [v0.1.0
+release](https://github.com/gigiheristiawan/timebox/releases/tag/v0.1.0) and the
+landing page is live at <https://gigiheristiawan.github.io/timebox/>. Everything
+below is the repeatable procedure; the one-time setup (certificate, API key,
+Pages) is done and marked as such where it appears.
 
 ---
 
@@ -16,6 +17,7 @@ runbook is now the procedure for the *next* release.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-24 20:15 | **§0 added — the version bump**, which was the one release step this runbook never wrote down: five files, and `CFBundleVersion` moves independently of the marketing version. Settings now shows the version, inlined from `tauri.conf.json` at build time, so it needs no separate edit. §6 made version-agnostic (`VERSION=` rather than a literal `0.1.0`), and its Pages block marked one-time-and-done. Recorded the 0.2.0 run: building in a shell without the §3 exports produced an **ad-hoc, linker-signed** app — `flags=0x20002(adhoc,linker-signed)`, `TeamIdentifier=not set` — which is the app-level failure shape §3 already names. |
 | 2026-08-21 16:40 | §7 now points at `appstore/INDEX.md` for the listing side of a submission — copy, screenshots, privacy answers, review notes — which is separate from building the package. 0.1.0 build 2 submitted for review. |
 | 2026-08-21 15:20 | §7.3: **ITMS-91109** — the provisioning profile carries `com.apple.quarantine` from the browser download, and `cp` preserves it; one quarantined file rejects the whole submission, reported only by email ~20 min after a *successful* upload. `build-mas.sh` now runs `xattr -cr` before signing and asserts none survives. Also: `CFBundleVersion` must increase on every upload, a failed delivery included. |
 | 2026-08-21 14:00 | **Correction to §7.3:** the MAS .pkg cannot be installed and launched locally — Gatekeeper rejects the 3rd Party Mac Developer signature and the profile authorises no devices, so `open` fails with a launchd spawn error. The previous "install the .pkg, then check the container" instruction was wrong. `scripts/sandbox-smoketest.sh` added for local sandbox verification, and the installer's bundle-relocation trap recorded. |
@@ -37,6 +39,42 @@ runbook is now the procedure for the *next* release.
 | 2026-08-20 03:05 | Recorded the Team ID, how to read an identity off a certificate, and the "no identity found" failure mode. |
 | 2026-08-20 02:30 | Recorded the measured 0.1.0 baseline in §4.                                  |
 | 2026-08-20 02:10 | Initial version — icon regeneration, universal build, signing, notarization. |
+
+---
+
+## 0. The version bump
+
+Do this first: it decides the DMG's filename, the tag, and what the app reports
+about itself, and every later step reads one of those.
+
+Five files carry a version, and **two of them move independently**:
+
+| File | Field | Rule |
+| ---- | ----- | ---- |
+| `src-tauri/tauri.conf.json` | `version` | The marketing version. This one is authoritative — the bundle, the DMG filename and `verify-release.sh` all read it. |
+| `src-tauri/Cargo.toml` | `version` | Must match. |
+| `src-tauri/Cargo.lock` | the `timebox` package entry | Must match, or the next `cargo` run rewrites it and dirties the tree mid-release. |
+| `package.json` | `version` | Must match — §6 requires the tag to agree with both this and `tauri.conf.json`. |
+| `src-tauri/Info.plist` | `CFBundleVersion` | **Not the marketing version.** A build number that must *strictly increase on every App Store upload*, a failed delivery included. It never resets when the marketing version changes. |
+
+`CFBundleShortVersionString` is not edited by hand — Tauri derives it from
+`tauri.conf.json`. Only `CFBundleVersion` is overridden in `Info.plist`, and the
+comment there records which build number went where.
+
+**Settings needs no edit.** The version shown at the bottom of the Settings
+window is `__APP_VERSION__`, inlined from `tauri.conf.json` by `vite.config.ts`
+at build time. It is a build constant rather than IPC state, so it cannot drift
+from the bundle and there is no sixth copy to remember.
+
+Then write the notes, before the build rather than after:
+
+```bash
+$EDITOR docs/release-notes/<version>.md
+```
+
+One file per release (§6). Writing them first is not bookkeeping — it is the
+step that catches a reversed invariant or a removed confirmation dialog while
+there is still time to reconsider, and 0.2.0 had both.
 
 ---
 
@@ -329,7 +367,8 @@ rebuild — stapling attaches a ticket to the existing file and does not touch t
 app inside it, so the app's own signature and ticket are unaffected:
 
 ```bash
-DMG=src-tauri/target/universal-apple-darwin/release/bundle/dmg/TimeBox_0.1.0_universal.dmg
+VERSION=$(python3 -c 'import json;print(json.load(open("src-tauri/tauri.conf.json"))["version"])')
+DMG="src-tauri/target/universal-apple-darwin/release/bundle/dmg/TimeBox_${VERSION}_universal.dmg"
 
 xcrun notarytool submit "$DMG" \
   --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
@@ -358,6 +397,34 @@ the build environment was right and the container just needs the step above,
 while an app-level failure means the §3 environment was missing from the shell
 that ran the build — in which case Tauri signs without notarizing, or skips
 signing entirely, and only warns.
+
+Both shapes were hit in one sitting on the 0.2.0 build, which is the clearest
+illustration of the distinction:
+
+```
+▸ Developer ID authority + hardened runtime + Team ID
+  CodeDirectory … flags=0x20002(adhoc,linker-signed)
+  TeamIdentifier=not set
+```
+
+That is the **app-level** failure — six checks down, and nothing to do with the
+code. `adhoc,linker-signed` is what the linker leaves behind when no signing
+identity was ever offered: the build ran in a shell where the §3 exports were
+absent, and Tauri warned rather than failed. The fix is to export them and
+rebuild; there is nothing to repair in the bundle.
+
+Rebuilt with the environment present, the same script left only:
+
+```
+✗ Ticket stapled to the DMG
+✗ Gatekeeper accepts the DMG          source=Unnotarized Developer ID
+```
+
+`source=Unnotarized Developer ID` rather than `no usable signature` is the tell:
+the signature is real and the app inside is stapled — only the container was
+never submitted. That is the **DMG-only** shape, and it is the expected state of
+every `tauri build`, not a mistake. Notarize the container per the step above;
+do not rebuild.
 
 The individual commands, if you want them by hand:
 
@@ -427,19 +494,28 @@ one, so the link never needs editing again.
 
 ```bash
 # only after ./scripts/verify-release.sh exits clean, DMG checks included
-gh release create v0.1.0 \
-  src-tauri/target/universal-apple-darwin/release/bundle/dmg/TimeBox_0.1.0_universal.dmg \
-  --title "TimeBox 0.1.0" \
-  --notes-file docs/release-notes/0.1.0.md \
+VERSION=$(python3 -c 'import json;print(json.load(open("src-tauri/tauri.conf.json"))["version"])')
+
+gh release create "v$VERSION" \
+  "src-tauri/target/universal-apple-darwin/release/bundle/dmg/TimeBox_${VERSION}_universal.dmg" \
+  --title "TimeBox $VERSION" \
+  --notes-file "docs/release-notes/$VERSION.md" \
   --draft
 ```
+
+Reading `VERSION` from `tauri.conf.json` rather than typing it is the same
+reason `verify-release.sh` does: it is the file the bundle is stamped from, so
+a typed version can disagree with the artifact it names and a derived one
+cannot.
 
 Release notes live at `docs/release-notes/<version>.md`, one file per release,
 so the published notes are reviewable in the repo before they are public.
 
 The tag must match `version` in **both** `package.json` and
 `src-tauri/tauri.conf.json` — they are the version the app reports, and a
-mismatch means the About box disagrees with the download.
+mismatch means the version in Settings disagrees with the download. `gh release
+create` tags the **current commit**, so commit the §0 bump and the notes before
+running it, or the tag points at a tree still claiming the old version.
 
 Use `--draft` to stage the assets and publish from the web UI once the download
 has been verified on another Mac; a draft is invisible to `releases/latest`.
@@ -447,7 +523,8 @@ has been verified on another Mac; a draft is invisible to `releases/latest`.
 ### The landing page (GitHub Pages)
 
 Served from the `docs/` folder on `main` — no workflow, no build step, so a
-`git push` publishes it.
+`git push` publishes it. **Nothing here is needed for a subsequent release:**
+the two commands below are the one-time setup, run for 0.1.0 and already done.
 
 ```bash
 gh api -X POST repos/gigiheristiawan/timebox/pages \
