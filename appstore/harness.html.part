@@ -1,0 +1,84 @@
+
+<style id="shotcss">
+  html, body { margin:0; padding:0; background:var(--ground); overflow:hidden; height:100%; }
+  /* Flex rather than measured pixels: the two bands must fill the frame exactly,
+     and window.innerHeight is not reliable under --force-device-scale-factor. */
+  .page { max-width:none !important; margin:0 !important; padding:0 !important;
+          height:100vh; display:flex; flex-direction:column; }
+  .masthead, .rail, .legend { display:none !important; }
+  .desktop { border-radius:0 !important; border:0 !important;
+             min-height:0 !important; flex:1 1 auto; }
+
+  #shotcap { flex:0 0 24%; box-sizing:border-box;
+             display:flex; flex-direction:column; align-items:center; justify-content:center;
+             gap:14px; text-align:center; padding:0 90px; background:var(--ground); color:var(--ink); }
+  #shotcap h2 { margin:0; font-size:42px; line-height:1.12; font-weight:650;
+                letter-spacing:-0.025em; max-width:1150px; }
+  #shotcap p  { margin:0; font-size:20px; line-height:1.45; color:var(--ink-2); max-width:840px; }
+
+  /* The prototype positions its windows inside a ~1140px canvas. At 1440 they
+     drift into a corner, so each shot gets its own composition. */
+  html[data-shot="running"] #mainwin {
+    top:50%; left:50%; width:620px; height:582px;
+    transform:translate(-50%,-50%) scale(1.06);
+  }
+  html[data-shot="popover"] #mainwin {
+    top:50%; left:170px; width:560px; height:548px;
+    transform:translateY(-50%) scale(1.02);
+  }
+  html[data-shot="popover"] .popover {
+    right:96px; width:320px; transform:scale(1.24); transform-origin:top right;
+  }
+  html[data-shot="settings"] #mainwin {
+    top:50%; left:200px; width:560px; height:548px; transform:translateY(-50%);
+  }
+  html[data-shot="settings"] #settingswin {
+    top:50%; left:820px; width:400px; height:452px; transform:translateY(-50%);
+  }
+</style>
+<script>
+(function(){
+  const q = new URLSearchParams(location.search);
+  const shot  = q.get('shot')  || 'running';
+  const theme = q.get('theme') || 'light';
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.shot  = shot;
+
+  speed = 0;   // a screenshot must be deterministic
+
+  const CAPS = {
+    running:    ["The timer decides how long — never whether you're done.",
+                 "Give a task a block. When the block ends, whether the work is finished is still your call."],
+    checkpoint: ["Every block ends at a decision.",
+                 "No dismiss, no snooze, no automatic next. TimeBox stops and asks what actually happened."],
+    popover:    ["It lives in the menu bar.",
+                 "Start, switch, pause or finish a block without leaving what you're doing."],
+    settings:   ["Tuned to your day, not to a fixed 25 minutes.",
+                 "Block length, break length, and the working time you actually have. None of it can switch the checkpoint off."],
+  };
+
+  seed();
+  if(shot === 'checkpoint'){
+    startTask(S.queue[0]);
+    vclock = curBlock().endAt;
+    S.timerState = 'AWAITING_DECISION';
+  } else {
+    startTask(S.queue[0]);
+    vclock += 12*60*1000;
+    if(shot === 'popover')  S.popover = true;
+    if(shot === 'settings') S.settingsOpen = true;
+  }
+  render();
+
+  const desk = document.getElementById('desktop');
+  const cap  = document.createElement('div');
+  cap.id = 'shotcap';
+  cap.innerHTML = '<h2></h2><p></p>';
+  const [h, p] = CAPS[shot] || CAPS.running;
+  cap.querySelector('h2').textContent = h;
+  cap.querySelector('p').textContent  = p;
+  desk.parentNode.insertBefore(cap, desk);
+
+  window.__shotReady = true;
+})();
+</script>
