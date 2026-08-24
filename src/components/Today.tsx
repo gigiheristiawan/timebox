@@ -25,8 +25,11 @@ export function Today() {
         <Stat value={String(t.tasksPending)} label="Tasks pending" />
         <Stat value={String(t.blocksCompleted)} label="Blocks completed" />
         <Stat value={durStr(t.breakMs)} label="On break" className="text-rest-ink" />
-        {/* D13: surfaced, never guessed at and never credited to a task. */}
-        <Stat value={durStr(t.awayMs)} label="Away at a checkpoint" className="text-ink-2" />
+        {/* IDLE_TIME §3. Named as what it measures — window time no block
+            covered — never as "time you were not working"; the app does not
+            observe the human. Away is a *cause* of it (§3.1), not a peer, so
+            the causes belong in the report rather than beside the total. */}
+        <Stat value={durStr(t.idleMs)} label="Idle in working hours" className="text-ink-2" />
         <Stat
           value={`${t.switchedEarly}×${churn ? " ⚠" : ""}`}
           label="Switched early"

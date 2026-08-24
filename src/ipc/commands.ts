@@ -36,18 +36,9 @@ export function openSettingsWindow(): Promise<void> {
 }
 
 /**
- * Quitting (SPEC D14). `requestQuit` quits outright unless a block is running,
- * in which case the backend opens the confirm window. The decision of whether
- * to ask lives in Rust — the UI never predicts it.
+ * Quitting (IDLE_TIME §9.1). It is never confirmed and never blocked: quitting
+ * parks the running block (D16), so there is no cost left to warn about.
  */
 export function requestQuit(): Promise<void> {
   return invoke<void>("request_quit");
-}
-
-export function confirmQuit(pause: boolean): Promise<void> {
-  return invoke<void>("confirm_quit", { pause });
-}
-
-export function cancelQuit(): Promise<void> {
-  return invoke<void>("cancel_quit");
 }

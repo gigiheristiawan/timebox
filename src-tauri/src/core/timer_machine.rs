@@ -15,6 +15,17 @@ pub struct MachineState {
     pub blocks: Vec<TimeBlock>,
     pub queue: Vec<TaskId>,
     pub current_block_id: Option<BlockId>,
+
+    /// Closed idle spans, in the order they were banked. Not sent to the UI:
+    /// the numbers it needs are already on the snapshot's summary, and the
+    /// list grows by a handful of rows a day forever.
+    #[serde(skip)]
+    pub idle_spans: Vec<IdleSpan>,
+    /// The span currently accruing. `Some` exactly when the timer is not
+    /// RUNNING *and* something has run at least once — at most one, mirroring
+    /// `current_block_id` and the schema's partial unique index.
+    #[serde(skip)]
+    pub open_idle: Option<IdleSpan>,
 }
 
 impl Default for MachineState {
@@ -25,6 +36,8 @@ impl Default for MachineState {
             blocks: Vec::new(),
             queue: Vec::new(),
             current_block_id: None,
+            idle_spans: Vec::new(),
+            open_idle: None,
         }
     }
 }
@@ -50,6 +63,10 @@ pub enum Event {
     DecideBreak { ms: Millis, complete: bool },
     EndBreak,
     ExtendBreak { ms: Millis },
+    /// Start a break without waiting for a checkpoint (IDLE_TIME D22). Parks
+    /// the work block and leaves the task at the queue *head* — a break is a
+    /// return to the same work, not a rotation away from it.
+    StartBreak { ms: Millis },
 
     RemoveTask { task: TaskId },
     /// Adding never starts anything — the user chooses when work begins.
@@ -127,6 +144,7 @@ pub fn reduce(
     ids: &mut dyn IdSource,
 ) -> (MachineState, Vec<Effect>) {
     let mut fx = Vec::new();
+    let before = state.timer_state;
 
     match event {
         Event::Tick => {
@@ -273,6 +291,23 @@ pub fn reduce(
             }
         }
 
+        Event::StartBreak { ms } => {
+            // The checkpoint has no side doors, and during a break the
+            // operation is ExtendBreak (tests 44, 45).
+            if ms > 0 && !at_work_checkpoint(&state) && !state.on_break() {
+                if let Some(id) = state.current_block_id.clone() {
+                    if state.timer_state == TimerState::Running {
+                        // Parked, not ended, and with no interruption counted:
+                        // D11 measures churn between tasks, and tinting Today
+                        // because someone took lunch would contradict D9.
+                        park(&mut state, &id, now);
+                    }
+                    state.current_block_id = None;
+                }
+                start_break(&mut state, ms, now, ids, &mut fx);
+            }
+        }
+
         Event::AddTask { title, block_ms, priority } => {
             let title = title.trim().to_string();
             if !title.is_empty() && block_ms > 0 {
@@ -319,6 +354,8 @@ pub fn reduce(
         }
     }
 
+    sync_idle(&mut state, before, now, ids);
+
     fx.push(Effect::UpdateMenuBar);
     fx.push(Effect::Persist);
     (state, fx)
@@ -332,6 +369,40 @@ fn at_work_checkpoint(s: &MachineState) -> bool {
 
 fn at_break_checkpoint(s: &MachineState) -> bool {
     s.timer_state == TimerState::AwaitingDecision && s.on_break()
+}
+
+/// Bracket every instant the timer is not running (IDLE_TIME §5.4).
+///
+/// Called once, from the end of `reduce`, rather than per event arm — the rule
+/// is about the state entered, not about which event got there, and duplicating
+/// it per arm is how the two would drift.
+///
+/// The span closed here and `away_ms` record the same interval when the state
+/// left is `AwaitingDecision`. They are two views of one fact, not two
+/// accumulators: `away_ms` is per block (D13, and what the staleness line
+/// reads), the span is per interval (what the day's idle reads). Neither is
+/// derived from the other, and both are written only on a real transition, so
+/// they agree.
+fn sync_idle(state: &mut MachineState, before: TimerState, now: Millis, ids: &mut dyn IdSource) {
+    let after = state.timer_state;
+    if after == before {
+        return;
+    }
+    if let Some(mut open) = state.open_idle.take() {
+        // A zero-length span is banked as nothing rather than as a row.
+        if now > open.started_at {
+            open.ended_at = Some(now);
+            state.idle_spans.push(open);
+        }
+    }
+    if let Some(reason) = IdleReason::of(after) {
+        state.open_idle = Some(IdleSpan {
+            id: ids.next_id(),
+            started_at: now,
+            ended_at: None,
+            reason,
+        });
+    }
 }
 
 /// Bank the time the current block spent waiting for an answer (SPEC D13).

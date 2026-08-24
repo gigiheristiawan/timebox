@@ -1,7 +1,11 @@
 # TimeBox — Implementation Plan
 
 **Companion to:** [SPEC.md](SPEC.md) · **Prototype:** [mockup.html](mockup.html)
-**Status:** Phases 1–7 complete · Phase 8 at 5/7, **blocked on an Apple Developer Program membership** for signing and notarization · **Last updated:** 2026-08-20
+**Status:** Phases 1–7 complete · Phase 8 at 5/7, **blocked on an Apple Developer Program membership** for signing and notarization · **Last updated:** 2026-08-24
+
+This file covers the MVP only. Work after it has its own plan beside its spec —
+see [features/IDLE_TIME_PLAN.md](features/IDLE_TIME_PLAN.md) (landed 2026-08-24)
+and [features/SLEEP_DETECTION.md](features/SLEEP_DETECTION.md) (not started).
 
 Update the status marks in this file as work lands. Everything here is derived from SPEC.md — if the two disagree, SPEC.md wins and this file should be corrected.
 
@@ -13,6 +17,7 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 
 | Date (WIB)       | Change                                                                                                                                                                        |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-24 16:40 | Scoped to the MVP: idle time (D15–D22) landed under its own plan, `features/IDLE_TIME_PLAN.md`, and is not tracked here. It deleted the D14 quit confirmation, so any row below referring to that window describes something that no longer exists. |
 | 2026-08-20 20:45 | **8.7 done — 0.1.0 published.** Release live with the notarized DMG attached, Pages landing page built. Phase 8 is 7/8; only the 8.6 acceptance pass remains. Totals corrected to 65/67 (they still counted a 7-task Phase 8). |
 | 2026-08-20 20:35 | Doc audit. Three rows described superseded mechanisms: 8.1 credited `icons/generate.py` (the icon is exported artwork now), 6.1 said the tray glyph is drawn in `tray.rs` (it is the asset `icons/tray.png`), and the Phase 4 note still told the reader `grep TEMPORARY src/` finds the 1-minute test durations (8.0 removed them). |
 | 2026-08-20 17:50 | **8.3 and 8.4 complete.** Signed, notarized, stapled universal build verified — all 7 checks in the new `scripts/verify-release.sh` pass, app and DMG both stapled. Supersedes the 16:45 entry. |
@@ -212,7 +217,7 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 | 7.8 | Launch at login | ✅ | `tauri-plugin-autostart`; a failure is logged, never fails the save |
 | 7.9 | First-run panel pointing at the menu bar | ✅ | D12. Flag stored (`settings.first_run_done`), so a relaunch does not bring it back |
 | 7.10 | `Away` total in Today | ✅ | D13. Banked on the block at each checkpoint exit (`away_ms`) plus the open checkpoint's live staleness |
-| 7.11 | Quit confirm while a block is running (Pause & Quit / Quit / Cancel) | ✅ | D14. Hooked on **both** the popover's Quit and `RunEvent::ExitRequested`, so `Cmd+Q` asks too; `handle.exit(0)` carries a code, which is how an answered confirm gets through |
+| 7.11 | ~~Quit confirm while a block is running~~ | ✂ | **Removed 2026-08-24** by IDLE_TIME D16: quitting parks the block, so the confirm had nothing left to warn about. Both hooks survive and now park instead of asking |
 
 **Away time is stored, not derived (7.10).** `end_at` alone cannot reconstruct it: a *parked* block also carries a past `end_at` though no checkpoint was ever open, and a block extended after expiring reaches the checkpoint more than once. Migration 002 adds `time_blocks.away_ms`, banked by `settle_away` at each accepted checkpoint decision — and only accepted ones, so a refused `SwitchTo` cannot make the wait count twice.
 

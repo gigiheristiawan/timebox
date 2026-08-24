@@ -556,12 +556,353 @@ fn a_rejected_event_at_a_checkpoint_banks_nothing() {
     assert_eq!(blocks_for(&s, "A")[0].away_ms, 60 * MIN, "counted once, not twice");
 }
 
+// ------------------------------------------- Tests 42–47: deliberate breaks
+//
+// IDLE_TIME D22. Without them every rest taken between checkpoints is recorded
+// as idle, which makes the measure punish the honest user.
+
+#[test]
+fn t42_start_break_parks_the_block_and_keeps_the_task_at_the_head() {
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::StartBreak { ms: 45 * MIN }, 10 * MIN, &mut ids);
+
+    assert!(s.on_break(), "a break is running");
+    assert_eq!(s.timer_state, TimerState::Running);
+    let parked = s.parked_for(&"A".to_string()).expect("A holds its remainder");
+    assert_eq!(parked.remaining_when_paused_ms, Some(20 * MIN));
+    // Unlike a switch, which rotates to the tail: a break is a return to the
+    // same work, so the break checkpoint offers A again and not B.
+    assert_eq!(s.queue.first().unwrap(), "A");
+
+    let s = fire(s, Event::Tick, 55 * MIN, &mut ids);
+    let s = fire(s, Event::EndBreak, 55 * MIN, &mut ids);
+    assert_eq!(s.current_task().unwrap().id, "A", "the break returned to the same task");
+    assert_eq!(s.remaining_ms(55 * MIN), 20 * MIN, "and to its remainder, not a fresh block");
+}
+
+#[test]
+fn t43_a_deliberate_break_is_not_an_interruption() {
+    // D11 counts churn *between tasks*. Tinting Today's "Switched early"
+    // warning because someone took lunch would contradict D9's claim about rest.
+    let (s, mut ids) = start_a(0);
+    let broke = fire(s.clone(), Event::StartBreak { ms: 10 * MIN }, 10 * MIN, &mut ids);
+    let switched = fire(s, Event::SwitchTo { task: "B".into() }, 10 * MIN, &mut ids);
+
+    assert_eq!(blocks_for(&broke, "A")[0].interruptions, 0);
+    assert_eq!(blocks_for(&switched, "A")[0].interruptions, 1, "a switch still counts");
+}
+
+#[test]
+fn t44_start_break_is_a_no_op_at_a_work_checkpoint() {
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+    let after = fire(s.clone(), Event::StartBreak { ms: 10 * MIN }, 31 * MIN, &mut ids);
+
+    assert_eq!(after.timer_state, TimerState::AwaitingDecision);
+    assert!(!after.on_break(), "the checkpoint has no side doors");
+    assert_eq!(after.blocks.len(), s.blocks.len());
+}
+
+#[test]
+fn t45_start_break_during_a_break_is_a_no_op() {
+    // ExtendBreak is the operation during one; a second break block would
+    // orphan the first and double-count the rest.
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::StartBreak { ms: 10 * MIN }, 5 * MIN, &mut ids);
+    let after = fire(s.clone(), Event::StartBreak { ms: 30 * MIN }, 6 * MIN, &mut ids);
+
+    assert_eq!(after.blocks.len(), s.blocks.len());
+    assert_eq!(after.remaining_ms(6 * MIN), 9 * MIN, "still the original break");
+}
+
+#[test]
+fn a_deliberate_break_can_start_from_idle_and_from_paused() {
+    let (s, mut ids) = day();
+    let idle = fire(s.clone(), Event::StartBreak { ms: 10 * MIN }, 0, &mut ids);
+    assert!(idle.on_break());
+
+    let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+    let s = fire(s, Event::Pause, 5 * MIN, &mut ids);
+    let s = fire(s, Event::StartBreak { ms: 10 * MIN }, 6 * MIN, &mut ids);
+    assert!(s.on_break());
+    assert_eq!(
+        s.parked_for(&"A".to_string()).unwrap().remaining_when_paused_ms,
+        Some(25 * MIN),
+        "the pause held the remainder; the break must not spend it"
+    );
+}
+
+mod idle {
+    //! Tests 23–33 (IDLE_TIME §7). Idle is *inferred*: window time that no
+    //! running block covered. Every test here fixes a claim the daily report
+    //! would otherwise make falsely.
+
+    use super::*;
+    use crate::core::summary::{summarize, Summary};
+
+    const HOUR: Millis = 60 * MIN;
+    const DAY: Millis = 0;
+    const AVAILABLE: Millis = 420 * MIN;
+    /// 09:00–18:00 on the day beginning at `DAY`.
+    const WINDOW: (Millis, Millis) = (9 * HOUR, 18 * HOUR);
+
+    fn at(h: i64, m: i64) -> Millis {
+        h * HOUR + m * MIN
+    }
+
+    fn sum_at(s: &MachineState, now: Millis, window: Option<(Millis, Millis)>) -> Summary {
+        summarize(s, DAY, now, AVAILABLE, window)
+    }
+
+    fn today(s: &MachineState, now: Millis) -> crate::core::summary::Today {
+        sum_at(s, now, Some(WINDOW)).today
+    }
+
+    /// The three sub-buckets must always sum to the total. Asserted in every
+    /// test rather than only in the property test, because a bucket that leaks
+    /// is invisible in any single number.
+    fn assert_sums(t: &crate::core::summary::Today) {
+        assert_eq!(
+            t.idle_ms,
+            t.idle_awaiting_ms + t.idle_paused_ms + t.idle_untracked_ms,
+            "the causes must partition idle exactly (test 32)"
+        );
+    }
+
+    #[test]
+    fn t23_a_late_start_is_untracked_idle() {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(10, 30), &mut ids);
+
+        let t = today(&s, at(10, 45));
+        assert_eq!(t.idle_untracked_ms, 90 * MIN, "09:00 to 10:30 was never claimed");
+        assert_eq!(t.idle_ms, 90 * MIN);
+        assert_sums(&t);
+    }
+
+    #[test]
+    fn t24_a_pause_is_idle_and_is_not_worked() {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(9, 0), &mut ids);
+        let s = fire(s, Event::Pause, at(11, 0), &mut ids);
+        let s = fire(s, Event::Resume, at(11, 20), &mut ids);
+
+        let t = today(&s, at(11, 30));
+        assert_eq!(t.idle_paused_ms, 20 * MIN);
+        assert_eq!(t.idle_untracked_ms, 0, "nothing before 09:00 counts");
+        // D4: the pause was never worked either. The 30-minute block ran
+        // 09:00–11:00 in wall time but its allocation caps what it can report.
+        assert_eq!(t.worked_ms, 30 * MIN);
+        assert_sums(&t);
+    }
+
+    #[test]
+    fn t25_time_at_a_checkpoint_is_idle_and_matches_away() {
+        // The same interval seen two ways — per block (`away_ms`, D13) and per
+        // interval (the span). They are two views of one fact and must agree;
+        // if they ever drift, one of the two writers has been changed alone.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(13, 30), &mut ids);
+        let s = fire(s, Event::Tick, at(14, 0), &mut ids);
+        let s = fire(s, Event::DecideComplete, at(14, 25), &mut ids);
+
+        let t = today(&s, at(14, 30));
+        assert_eq!(t.idle_awaiting_ms, 25 * MIN);
+        assert_eq!(t.away_ms, 25 * MIN, "away_ms and the AWAITING span record one gap");
+        assert_sums(&t);
+    }
+
+    #[test]
+    fn t26_quitting_parks_the_block_and_the_gap_is_idle_not_work() {
+        // The measure this whole feature exists for. Quitting is a pause
+        // (D16): an interval cannot be idle and worked at once.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(14, 50), &mut ids);
+        // 15:00 — the quit path dispatches the existing Pause.
+        let s = fire(s, Event::Pause, at(15, 0), &mut ids);
+        let worked_at_quit = today(&s, at(15, 0)).worked_ms;
+
+        // Reopened an hour later. Nothing happened in between, and the open
+        // span kept accruing while the app was not running.
+        let t = today(&s, at(16, 0));
+        assert_eq!(t.idle_paused_ms, 60 * MIN);
+        assert_eq!(t.worked_ms, worked_at_quit, "the clock stopped when the app did");
+        let held = s.current_block().unwrap();
+        assert_eq!(held.status, BlockStatus::Paused);
+        assert_eq!(held.remaining_when_paused_ms, Some(20 * MIN), "held, never re-granted");
+        assert_sums(&t);
+    }
+
+    #[test]
+    fn t27_idle_is_sealed_at_work_end_not_at_the_next_launch() {
+        // Without the seal, a block left parked over a long weekend would
+        // report days of idle on the next hydrate.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(17, 0), &mut ids);
+        let s = fire(s, Event::Pause, at(17, 30), &mut ids);
+
+        let next_morning = at(33, 0); // 09:00 tomorrow, still the same open span
+        let t = today(&s, next_morning);
+        assert_eq!(t.idle_paused_ms, 30 * MIN, "17:30 to 18:00 only");
+        assert!(t.idle_ms <= 9 * HOUR, "a day's idle can never exceed its window");
+        assert_sums(&t);
+    }
+
+    #[test]
+    fn t28_work_after_work_end_is_recorded_and_adds_no_idle() {
+        // D17: the day's idle is sealed at work_end; the day's work is not.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(9, 0), &mut ids);
+        let s = fire(s, Event::Tick, at(9, 30), &mut ids);
+        let s = fire(s, Event::DecideComplete, at(9, 30), &mut ids); // B starts
+        let s = fire(s, Event::Pause, at(9, 45), &mut ids);
+        let sealed = today(&s, at(18, 0));
+
+        let s = fire(s, Event::Resume, at(20, 0), &mut ids);
+        let t = today(&s, at(20, 30));
+        assert!(t.outside_hours_ms > 0, "evening work is a signal, not an error");
+        assert_eq!(t.outside_hours_ms, 30 * MIN);
+        assert_eq!(t.idle_ms, sealed.idle_ms, "and it changes no idle figure");
+        assert_sums(&t);
+    }
+
+    #[test]
+    fn t29_a_non_working_day_records_work_and_no_idle() {
+        // D18: a weekend is a day whose window is empty, so nothing about it
+        // can be idle — no claim of presence was ever made.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(11, 0), &mut ids);
+
+        let t = sum_at(&s, at(11, 20), None).today;
+        assert_eq!(t.idle_ms, 0);
+        assert_eq!(t.worked_ms, 20 * MIN);
+        assert_eq!(t.outside_hours_ms, 20 * MIN);
+        assert_sums(&t);
+    }
+
+    #[test]
+    fn t30_a_day_with_no_blocks_reports_no_idle() {
+        // D19, the holiday and sick-day answer. The accepted cost is that a
+        // genuinely wasted working day is indistinguishable from a day off —
+        // the app must not guess which it was.
+        let (s, _ids) = day(); // tasks queued, nothing ever started
+        let t = today(&s, at(17, 0));
+        assert_eq!(t.idle_ms, 0);
+        assert_eq!(t.idle_untracked_ms, 0);
+        assert_sums(&t);
+    }
+
+    #[test]
+    fn t31_an_open_span_survives_an_unclean_exit_and_keeps_accruing() {
+        // D15: the app need not be running for idle to accrue. A span left open
+        // by a crash describes a machine state that is still true — paused is
+        // still paused — so it is not closed at the last write, which would
+        // erase a real gap. See the D20 note in IDLE_TIME.md.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(15, 40), &mut ids);
+        let s = fire(s, Event::Pause, at(16, 10), &mut ids); // the last state write
+
+        let reloaded = s.clone(); // whatever comes back from SQLite is identical
+        assert!(reloaded.open_idle.is_some(), "the span is still open");
+        let t = today(&reloaded, at(17, 10));
+        assert_eq!(t.idle_paused_ms, 60 * MIN);
+        assert_sums(&t);
+    }
+
+    #[test]
+    fn t32_the_causes_partition_idle_for_any_sequence_of_events() {
+        // A property test over a long, deliberately messy day: every kind of
+        // departure from RUNNING, in an order no single test would produce.
+        let (mut s, mut ids) = day();
+        let script: &[(Millis, Event)] = &[
+            (at(9, 30), Event::SwitchTo { task: "A".into() }),
+            (at(9, 40), Event::Pause),
+            (at(10, 0), Event::Resume),
+            (at(10, 20), Event::SwitchTo { task: "B".into() }),
+            (at(11, 5), Event::Tick),
+            (at(11, 30), Event::DecidePending),
+            (at(11, 45), Event::StartBreak { ms: 15 * MIN }),
+            (at(12, 0), Event::Tick),
+            (at(12, 20), Event::EndBreak),
+            (at(12, 50), Event::Skip),
+            (at(13, 10), Event::CompleteCurrentTask),
+            (at(13, 40), Event::Pause),
+            (at(14, 0), Event::Resume),
+            (at(15, 0), Event::Tick),
+            (at(15, 30), Event::DecideExtend { ms: 10 * MIN }),
+            (at(15, 40), Event::Tick),
+            (at(16, 0), Event::DecideComplete),
+        ];
+        for (now, e) in script {
+            s = fire(s, e.clone(), *now, &mut ids);
+            for probe in [*now, now + 7 * MIN] {
+                let t = today(&s, probe);
+                assert_sums(&t);
+                assert!(t.idle_ms >= 0 && t.idle_ms <= 9 * HOUR, "idle stays inside the window");
+            }
+        }
+    }
+
+    #[test]
+    fn t33_idle_is_a_set_difference_and_not_a_subtraction() {
+        // A block spanning work_end. `window - worked - break` would subtract
+        // the whole 30 minutes from a window that only contains ten of them,
+        // and can go negative — which a duration cannot.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(9, 0), &mut ids);
+        let s = fire(s, Event::Tick, at(9, 30), &mut ids);
+        let s = fire(s, Event::DecidePending, at(9, 30), &mut ids); // B, 45m
+        let s = fire(s, Event::Pause, at(9, 31), &mut ids);
+        let s = fire(s, Event::Resume, at(17, 50), &mut ids);
+
+        let t = today(&s, at(18, 20));
+        // 09:31–17:50 is genuinely idle; 17:50–18:00 is covered and 18:00
+        // onwards is outside the window entirely.
+        assert_eq!(t.idle_paused_ms, at(17, 50) - at(9, 31));
+        assert_eq!(t.idle_ms, at(17, 50) - at(9, 31));
+        assert!(t.idle_ms > 0, "a set difference is never negative");
+        assert_sums(&t);
+    }
+
+    #[test]
+    fn t46_a_deliberate_break_is_break_and_not_idle() {
+        // The point of D22. Without it, lunch is indistinguishable from drift.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(11, 0), &mut ids);
+        let s = fire(s, Event::StartBreak { ms: 45 * MIN }, at(12, 30), &mut ids);
+
+        let t = today(&s, at(13, 15));
+        assert_eq!(t.break_ms, 45 * MIN);
+        assert_eq!(t.idle_ms, 2 * HOUR, "09:00–11:00 only; the break is not idle");
+        assert_sums(&t);
+    }
+
+    #[test]
+    fn t47_a_deliberate_break_does_not_consume_capacity() {
+        // D9 unchanged: rest is not spent from the day's working time.
+        let (s, mut ids) = day();
+        let before = sum_at(&s, at(11, 0), Some(WINDOW)).capacity.allocated_ms;
+        let s = fire(s, Event::StartBreak { ms: 45 * MIN }, at(11, 0), &mut ids);
+
+        let cap = sum_at(&s, at(11, 30), Some(WINDOW)).capacity;
+        assert_eq!(cap.allocated_ms, before, "a break is not queued work");
+        assert_eq!(today(&s, at(11, 30)).worked_ms, 0, "and it is not output");
+    }
+}
+
 mod summary {
     use super::*;
     use crate::core::summary::summarize;
 
     const DAY: Millis = 0;
     const AVAILABLE: Millis = 420 * MIN;
+    const HOUR: Millis = 60 * MIN;
+
+    /// A working day with an ordinary 09:00-18:00 window. These tests predate
+    /// the window and are about the other numbers; `idle` has its own module.
+    fn sum(s: &MachineState, day: Millis, now: Millis, available: Millis) -> crate::core::summary::Summary {
+        summarize(s, day, now, available, Some((day + 9 * HOUR, day + 18 * HOUR)))
+    }
 
     #[test]
     fn a_break_is_rest_and_never_counts_as_worked() {
@@ -571,7 +912,7 @@ mod summary {
         let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
         let s = fire(s, Event::DecideBreak { ms: 10 * MIN, complete: true }, 30 * MIN, &mut ids);
 
-        let sum = summarize(&s, DAY, 35 * MIN, AVAILABLE);
+        let sum = sum(&s, DAY, 35 * MIN, AVAILABLE);
         assert_eq!(sum.today.worked_ms, 30 * MIN);
         assert_eq!(sum.today.break_ms, 5 * MIN, "the running break counts only what it has spent");
         assert_eq!(sum.today.tasks_completed, 1);
@@ -587,7 +928,7 @@ mod summary {
         let s = fire(s, Event::SwitchTo { task: "B".into() }, 10 * MIN, &mut ids);
         let s = fire(s, Event::SwitchTo { task: "C".into() }, 20 * MIN, &mut ids);
 
-        assert_eq!(summarize(&s, DAY, 25 * MIN, AVAILABLE).today.switched_early, 2);
+        assert_eq!(sum(&s, DAY, 25 * MIN, AVAILABLE).today.switched_early, 2);
     }
 
     #[test]
@@ -598,7 +939,7 @@ mod summary {
         let s = fire(s, Event::SwitchTo { task: "B".into() }, 10 * MIN, &mut ids);
 
         // Queue is now B(45, running) A(20 parked) C(30) D(45).
-        let cap = summarize(&s, DAY, 10 * MIN, AVAILABLE).capacity;
+        let cap = sum(&s, DAY, 10 * MIN, AVAILABLE).capacity;
         assert_eq!(cap.allocated_ms, (45 + 20 + 30 + 45) * MIN);
         assert!(!cap.over);
         assert_eq!(cap.unallocated_ms, AVAILABLE - cap.allocated_ms);
@@ -607,7 +948,7 @@ mod summary {
     #[test]
     fn over_capacity_is_reported_but_never_blocked() {
         let (s, _ids) = day(); // 150m queued
-        let cap = summarize(&s, DAY, 0, 60 * MIN).capacity;
+        let cap = sum(&s, DAY, 0, 60 * MIN).capacity;
         assert!(cap.over);
         assert_eq!(cap.unallocated_ms, -90 * MIN, "the overrun is signed, not clamped");
     }
@@ -621,8 +962,8 @@ mod summary {
         let s = fire(s, Event::DecidePending, 30 * MIN, &mut ids);
 
         let tomorrow = 24 * 60 * MIN;
-        assert_eq!(summarize(&s, tomorrow, tomorrow, AVAILABLE).today.worked_ms, 0);
-        assert_eq!(summarize(&s, DAY, 30 * MIN, AVAILABLE).today.worked_ms, 30 * MIN);
+        assert_eq!(sum(&s, tomorrow, tomorrow, AVAILABLE).today.worked_ms, 0);
+        assert_eq!(sum(&s, DAY, 30 * MIN, AVAILABLE).today.worked_ms, 30 * MIN);
     }
 
     #[test]
@@ -632,7 +973,7 @@ mod summary {
         let (s, mut ids) = start_a(0);
         let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
 
-        assert_eq!(summarize(&s, DAY, 90 * MIN, AVAILABLE).today.away_ms, 60 * MIN);
+        assert_eq!(sum(&s, DAY, 90 * MIN, AVAILABLE).today.away_ms, 60 * MIN);
     }
 
     #[test]
@@ -642,7 +983,7 @@ mod summary {
         for (task, at) in [("A", 0), ("B", 30 * MIN), ("C", 40 * MIN), ("D", 45 * MIN)] {
             s = fire(s, Event::SwitchTo { task: task.into() }, at, &mut ids);
         }
-        let top = summarize(&s, DAY, 50 * MIN, AVAILABLE).today.top;
+        let top = sum(&s, DAY, 50 * MIN, AVAILABLE).today.top;
         assert_eq!(top.len(), 3);
         assert_eq!(top[0].ms, 30 * MIN); // A
         assert_eq!(top[1].ms, 10 * MIN); // B

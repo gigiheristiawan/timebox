@@ -1,14 +1,17 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { clockStr, durStr } from "../core/format";
 import { openMainWindow, openSettingsWindow, requestQuit } from "../ipc/commands";
-import { currentBlock, currentTask, isBreak, parkedFor, taskById, useTimebox } from "../stores/useTimebox";
+import { breakDefaultMs, currentBlock, currentTask, isBreak, parkedFor, taskById, useTimebox } from "../stores/useTimebox";
 import { Countdown } from "./Countdown";
 
 /** Matches `.popover` in docs/mockup.html — the design reference for this window. */
 const WIDTH = 300;
 /** How much of the queue fits before the popover becomes a second app. */
 const QUEUE_PREVIEW = 5;
+/** The same lengths the checkpoint offers, so a break is one control wherever
+ *  it is started (IDLE_TIME §6). */
+const BREAK_CHOICES = [5, 10, 15, 30];
 
 const LABEL = "font-mono text-[9.5px] uppercase tracking-[0.15em] text-ink-3";
 const SECTION = "px-3.5 py-3";
@@ -21,6 +24,9 @@ const SECTION = "px-3.5 py-3";
 export function Popover() {
   const { snap, error, init, send } = useTimebox();
   const card = useRef<HTMLDivElement>(null);
+  // null until the user picks one, so the control follows the setting rather
+  // than freezing whatever it was on the first snapshot.
+  const [chosenBreakMin, setChosenBreakMin] = useState<number | null>(null);
 
   useEffect(() => {
     let un: (() => void) | undefined;
@@ -50,6 +56,10 @@ export function Popover() {
   const queue = snap?.state.queue ?? [];
   const nextId = queue.find((id) => !(block?.taskId === id && state !== "Idle"));
   const next = nextId ? taskById(snap ?? null, nextId) : undefined;
+  const breakMin = chosenBreakMin ?? Math.round(breakDefaultMs(snap ?? null) / 60_000);
+  // D22: available from IDLE, RUNNING and PAUSED. At a work checkpoint the
+  // decision is owed first, and during a break the operation is Extend.
+  const canBreak = !!snap && state !== "AwaitingDecision" && !onBreak;
 
   return (
     <div
@@ -105,6 +115,33 @@ export function Popover() {
             </PopButton>
           )}
         </div>
+        {/* Take a break (IDLE_TIME D22) ---------------------------------- */}
+        {canBreak && (
+          <div className="mt-2.5 flex items-center gap-1.5 border-t border-line pt-2.5">
+            <button
+              type="button"
+              onClick={() => send({ kind: "startBreak", ms: breakMin * 60_000 })}
+              className="rounded-md border border-rest px-2.5 py-1 text-[12.5px] font-medium text-rest-ink transition-colors hover:bg-rest hover:text-white"
+            >
+              Take a break
+            </button>
+            <div className="ml-auto flex gap-1">
+              {BREAK_CHOICES.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setChosenBreakMin(m)}
+                  aria-pressed={m === breakMin}
+                  className={`rounded border px-1.5 py-0.5 font-mono text-[10.5px] transition-colors ${
+                    m === breakMin ? "border-rest bg-rest text-white" : "border-line-2 text-ink-3 hover:bg-surface-3"
+                  }`}
+                >
+                  {m}m
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Today's tasks --------------------------------------------------- */}
