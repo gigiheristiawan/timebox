@@ -158,9 +158,12 @@ export function Settings() {
         </p>
       </div>
 
-      <p className="border-t border-line pt-3 text-[12px] text-ink-3">
-        Nothing here changes whether a checkpoint appears. Expiry always requires a decision.
-      </p>
+      <div className="flex items-baseline gap-2 border-t border-line pt-3 text-[12px] text-ink-3">
+        <p>Nothing here changes whether a checkpoint appears. Expiry always requires a decision.</p>
+        {/* Inlined from tauri.conf.json at build time, so it is the version of
+            the bundle actually running — not a second copy to keep in step. */}
+        <span className="ml-auto flex-none font-mono text-[11px]">v{__APP_VERSION__}</span>
+      </div>
     </main>
   );
 }
