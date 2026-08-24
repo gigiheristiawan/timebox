@@ -20,6 +20,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "away_and_first_run",
         sql: include_str!("migrations/002_away_and_first_run.sql"),
     },
+    Migration {
+        version: 3,
+        name: "working_window",
+        sql: include_str!("migrations/003_working_window.sql"),
+    },
 ];
 
 pub fn run(conn: &mut Connection) -> crate::error::AppResult<()> {
@@ -120,13 +125,25 @@ mod tests {
             .query_row("SELECT first_run_done FROM settings WHERE id = 1", [], |r| r.get(0))
             .unwrap();
         assert_eq!(first_run, 0, "an existing install has not seen the panel either");
+
+        // Migration 003: the working window defaults to Mon-Fri 09:00-18:00 for
+        // an existing install too, so idle is measurable from the first launch
+        // after the upgrade rather than only once the user visits settings.
+        let (start, end, days): (i64, i64, i64) = conn
+            .query_row(
+                "SELECT work_start_minutes, work_end_minutes, working_weekdays FROM settings WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((start, end, days), (540, 1080, 31));
     }
 
     #[test]
     fn schema_has_the_four_expected_tables() {
         let mut conn = Connection::open_in_memory().unwrap();
         run(&mut conn).unwrap();
-        for t in ["tasks", "time_blocks", "app_state", "settings"] {
+        for t in ["tasks", "time_blocks", "app_state", "settings", "idle_spans"] {
             let n: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",

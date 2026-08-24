@@ -101,16 +101,13 @@ pub fn run() {
             commands::open_main_window,
             commands::open_settings_window,
             commands::close_popover,
-            commands::request_quit,
-            commands::confirm_quit,
-            commands::cancel_quit
+            commands::request_quit
         ])
         .build(tauri::generate_context!())
         .expect("error while building TimeBox")
-        // Cmd+Q reaches the app as an exit request rather than a command, so
-        // D14's confirmation has to be hooked here as well as on the popover's
-        // Quit item. `handle.exit(0)` carries a code, which is how an answered
-        // confirm gets through without re-asking.
+        // Quitting has to park the running block (D16) whichever door it came
+        // through, so the hook lives here as well as on the popover's Quit
+        // item, which goes through `commands::request_quit`.
         .run(|app, event| {
             // Launch Services will not start a second copy of an installed
             // bundle; it reopens the running one. That path is what a sandboxed
@@ -120,14 +117,35 @@ pub fn run() {
             if let tauri::RunEvent::Reopen { .. } = &event {
                 platform::popover::show(app);
             }
-            if let tauri::RunEvent::ExitRequested { api, code: None, .. } = &event {
-                let running = app
-                    .try_state::<std::sync::Arc<state::App>>()
-                    .map(|s| s.snapshot().timer_state == core::model::TimerState::Running)
-                    .unwrap_or(false);
-                if running {
-                    api.prevent_exit();
-                    platform::quit_confirm::show(app);
+            // A window coming forward is showing whatever snapshot it last
+            // received. The tick loop is the only thing that pushes fresh
+            // numbers, and it parks whenever the timer is not RUNNING — which
+            // is exactly when idle accrues (IDLE_TIME §3). Windows are hidden
+            // rather than destroyed, so the webview never remounts and never
+            // refetches on its own. Nudging on focus is what makes reopening a
+            // window show the truth rather than the last thing it was told.
+            if let tauri::RunEvent::WindowEvent { event: WindowEvent::Focused(true), .. } = &event {
+                let _ = app.emit("timebox://changed", ());
+            }
+            // Quitting *is* a pause (IDLE_TIME D16): the block is parked so the
+            // interval the app is closed reads as idle rather than as work.
+            //
+            // This must hang off `Exit`, not `ExitRequested`. `Cmd+Q` is muda's
+            // predefined Quit item, which sends `terminate:` straight to
+            // NSApplication; tao sees that as `applicationWillTerminate` and
+            // emits `Exit` alone, with no `ExitRequested` anywhere in the
+            // sequence. Hooked on `ExitRequested` the park silently never ran
+            // and the block came back RUNNING — the clock had kept going across
+            // the quit, which is the exact thing D16 removes.
+            //
+            // `Exit` is the one event every path reaches, `handle.exit(0)`
+            // included, and `Event::Pause` is a no-op unless the timer is
+            // RUNNING, so arriving here already parked costs nothing.
+            // `dispatch` writes the whole state before it returns, so the park
+            // is durable by the time the process goes away.
+            if let tauri::RunEvent::Exit = &event {
+                if let Some(s) = app.try_state::<std::sync::Arc<state::App>>() {
+                    commands::park_for_quit(&s);
                 }
             }
         });

@@ -4,6 +4,10 @@ import { dispatch as ipcDispatch, getSnapshot, updateSettings } from "../ipc/com
 import type { Action, Settings, Snapshot, Task, TimeBlock } from "../ipc/types";
 import { applyTheme } from "../theme";
 
+/** How often to refetch while the timer is stopped and the backend is silent.
+ *  Slow on purpose: the numbers it moves are minutes, not seconds. */
+const STOPPED_REFRESH_MS = 10_000;
+
 interface Store {
   snap: Snapshot | null;
   error: string | null;
@@ -56,7 +60,23 @@ export const useTimebox = create<Store>((set, get) => ({
     // The backend nudges once a second while a block runs; between nudges the
     // countdown is interpolated locally.
     const un = await listen("timebox://changed", () => void get().refresh());
-    return un;
+
+    // While the timer is NOT running there are no nudges at all: the tick
+    // thread parks on a condvar in IDLE / PAUSED / AWAITING_DECISION, which is
+    // what keeps idle CPU at nil. But that is precisely when `idleMs` and
+    // `stalenessMs` grow, so an open window would sit on a frozen number until
+    // the user's next action. This is a refresh cadence, not a rule — the UI
+    // still derives nothing; it asks Rust again (SPEC R6/R7). Interpolating
+    // locally is not an option either way: idle is a set difference over
+    // `idle_spans`, which the snapshot deliberately does not carry.
+    const poll = window.setInterval(() => {
+      if (get().snap?.state.timerState !== "Running") void get().refresh();
+    }, STOPPED_REFRESH_MS);
+
+    return () => {
+      un();
+      window.clearInterval(poll);
+    };
   },
 }));
 

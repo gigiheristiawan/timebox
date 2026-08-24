@@ -12,6 +12,8 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 
 | Date (WIB)       | Change                                                                                                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-24 16:40 | **§6 reversal landed, and D14 is superseded.** Quitting now parks the running block — `commands::request_quit` and `RunEvent::ExitRequested` both dispatch the existing `Event::Pause`, so the interval the app is closed reads as idle, not work (IDLE_TIME D16). The quit confirmation and its window are deleted: they existed to make the cost of quitting visible and there is no cost left. §6's paragraph is replaced rather than annotated, D14 is struck, §7.4's confirm paragraph and §11's quit rows are rewritten. D21 (sleep) is still pending and unaffected. |
+| 2026-08-24 11:20 | **§6 amended — pending reversal of "quitting does not stop the clock".** `docs/features/IDLE_TIME.md` (D16) parks the running block on quit, and `docs/features/SLEEP_DETECTION.md` (D21) does the same for a detected sleep, so that measured idle time and measured work can never claim the same interval. The paragraph and the sleep/wake bullet below are marked with what replaces them; neither is implemented yet, so the body still describes shipped behaviour. |
 | 2026-08-20 11:00 | Bundle identifier is `xyz.gigiheristiawan.timebox`; §4.5's data path updated to match. The identifier names the data directory, so the two can never be documented independently. |
 | 2026-08-20 01:20 | **D13 corrected in the body.** It read that Away is "derived from the expiry timestamp"; that is only true of the checkpoint currently open. Once answered, the gap cannot be reconstructed — a *parked* block also carries a past `end_at` though no checkpoint was ever open, and a block extended after expiring reaches the checkpoint more than once. Migration **002** adds `time_blocks.away_ms`, banked at each accepted decision, plus `settings.first_run_done` for D12's one-time panel. Neither changes what the product does; both make Today's Away line true. §4.5 amended. |
 | 2026-08-19 21:05 | §6: recorded *why* quitting does not stop the clock — pausing on quit would let a block be banked, the same loophole D10 closes. Noted the actual-duration cap.                    |
@@ -71,7 +73,7 @@ These were ambiguous in the handoff and are now fixed:
 | D5 | Empty queue at decision time | If no other task is queued, "Complete & Start Next" and "Keep Pending & Start Next" transition to `IDLE` with an empty-queue message rather than restarting the same task. |
 | D10 | Switching tasks mid-block | Allowed from `RUNNING` and `PAUSED` via `switchTo(taskId)`. The block is **parked, not terminated**: it goes to `PAUSED` holding `remainingWhenPausedSeconds`, stays attached to its task, and the task rotates to the **queue tail**. Returning to the task **resumes that same block with its remaining time** — a fresh allocation is never granted. Without this, switching away at 29:00 of a 30:00 block and returning would re-grant a full 30:00, making unlimited time on one task reachable without ever hitting a checkpoint. |
 | D11 | Switching is surfaced | Each block carries `interruptions: number`, incremented every time it is set down. Today shows `Switched early` = the sum across the day, warning-tinted above 2. This is a sharper signal than counting terminated blocks: it says *this one allocation was picked up and put down four times*. Never blocked — same treatment as extensions. |
-| D14 | Quitting with a block running | Quit shows a confirm: *"A 30-minute block is running. Quitting won't pause it."* with **Pause & Quit** (default) / **Quit** / **Cancel**. It prevents nothing — it makes the cost of a thoughtless quit visible, the same treatment extensions and switching get. Not shown when `IDLE`, `PAUSED`, or at a checkpoint (quitting there is already safe: the checkpoint is restored). |
+| ~~D14~~ | ~~Quitting with a block running~~ | **Superseded by D16 (2026-08-24)** — quitting parks the block, so the confirm has nothing left to warn about and is deleted. The original text: Quit shows a confirm: *"A 30-minute block is running. Quitting won't pause it."* with **Pause & Quit** (default) / **Quit** / **Cancel**. It prevents nothing — it makes the cost of a thoughtless quit visible, the same treatment extensions and switching get. Not shown when `IDLE`, `PAUSED`, or at a checkpoint (quitting there is already safe: the checkpoint is restored). |
 | D12 | First-run discoverability | `LSUIElement` leaves no Dock icon and no Cmd-Tab entry, and menu bar items can be hidden entirely by the notch. Two mitigations: relaunching an already-running instance **opens the popover** rather than silently focusing nothing, and a one-time first-run panel points at the menu bar. Without the first, a second double-click reads as a broken app. |
 | D13 | Time at an unanswered checkpoint | The clock stops at `AWAITING_DECISION`, so time between expiry and the decision is neither work nor break. It is **surfaced, never guessed at**: the checkpoint shows `This block ended 2h 14m ago` once the gap exceeds 2 minutes, and Today carries an `Away` line. The open checkpoint's gap is derived live from the expiry timestamp; each answered one is banked on the block (`away_ms`) because it cannot be reconstructed afterwards. Either way there is no idle detection, and no retroactive crediting of the gap to any task. |
 | D7 | Break as a checkpoint option | A break is a **time block with no task** (`kind: 'BREAK'`). **Break is a modifier on the task decision, not a substitute for it.** Both task decisions can be followed by a break, as single compound actions: `Complete & Break` and `Keep Pending & Break`. Break duration is selected *before* the action (a segmented control defaulting to `defaultBreakDurationSeconds`) so every compound action stays one click. |
@@ -254,13 +256,19 @@ No boolean flag soup. `isRunning`, `isPaused`, `hasExpired` etc. are derived, ne
 - `endAt` is stored as an absolute UTC instant and persisted immediately on every start/resume/extend.
 - The Rust tick loop runs at 1 Hz while `RUNNING` and is suspended entirely in `IDLE`, `PAUSED`, and `AWAITING_DECISION` (zero background work when not running).
 - On every tick, on window focus, on app resume, and on macOS wake, the app re-evaluates `now >= endAt`.
-- macOS sleep/wake: subscribe to `NSWorkspace.didWakeNotification`. On wake, immediately re-evaluate expiry before painting any UI.
+- macOS sleep/wake: subscribe to `NSWorkspace.didWakeNotification`. On wake, immediately re-evaluate expiry before painting any UI. *(As built this is not subscribed to at all: the tick thread sleeps against wall time, so a wake produces a late tick that resolves expiry on its own. **Pending D21** that late tick gains a second job — a gap far exceeding the tick interval is evidence of sleep, and the block is parked at the instant the Mac went to sleep rather than credited with the gap. See `docs/features/SLEEP_DETECTION.md`.)*
 - On app launch, hydrate from SQLite and re-evaluate expiry **before** first render. A block whose persisted `endAt` is in the past resolves to `AWAITING_DECISION`, never to a running or reset timer.
 - If a stored `PAUSED` block is loaded, remaining time is `remainingWhenPausedSeconds` — wall clock elapsed while paused is irrelevant.
 
 `actualDurationSeconds` is computed from accumulated active (non-paused) wall time, capped at total allocation for naturally-expired blocks. The cap is what keeps a block reopened after three days from reporting three days of work.
 
-**Quitting does not stop the clock.** A `RUNNING` block continues to consume its allocation while the app is not running, exactly as it does across sleep. This is deliberate and follows the same reasoning as D10: if quitting paused the allocation, quitting would become a way to *bank* time — close the app at 29:00 of a 30:00 block, reopen tomorrow, and still hold 29 minutes — letting one task consume unlimited time without ever reaching a checkpoint. Only an explicit `pause()` holds a remainder. Note that closing the main *window* is not quitting (§7.3); it hides the window and the timer runs on.
+**Quitting parks the block (D16, landed 2026-08-24).** Quitting *is* a pause: the exit path dispatches the existing `Event::Pause`, the block ends `PAUSED` holding its remainder, and the interval the app is closed is recorded as idle rather than as work (`docs/features/IDLE_TIME.md` §3). An interval cannot be both idle and worked, which is what forced the reversal.
+
+The loophole the old rule guarded against does not reopen. Parking preserves the **remainder** and never re-grants an allocation, so quitting at 29:00 of a 30:00 block leaves one minute, exactly as the Pause button does. `end_at` remains absolute and is never decremented; it is simply recomputed on the next resume, like any other park.
+
+Closing the main *window* is still not quitting (§7.3): it hides the window and the timer runs on. **Sleep is not yet covered** — until D21 lands, a Mac that sleeps mid-block still has the gap credited as work, bounded by the block's allocation cap.
+
+> **Reversed 2026-08-24 — the rule this replaced, kept for its reasoning.** *"Quitting does not stop the clock. A `RUNNING` block continues to consume its allocation while the app is not running, exactly as it does across sleep. This is deliberate and follows the same reasoning as D10: if quitting paused the allocation, quitting would become a way to bank time — close the app at 29:00 of a 30:00 block, reopen tomorrow, and still hold 29 minutes — letting one task consume unlimited time without ever reaching a checkpoint."* The anti-gaming concern was real and is answered above: parking holds the remainder rather than re-granting a block. What the old rule got wrong was the measurement, not the loophole.
 
 ---
 
@@ -353,7 +361,7 @@ On entering `AWAITING_DECISION`:
 
 For a `BREAK` block the same sequence runs with break copy (`BREAK'S OVER — Your 10-minute break has ended.`) and a softer sound (`Ping`). Window activation still applies — a break that silently expired would defeat the point.
 
-**Quit confirmation (D14).** Quitting while a work or break block is `RUNNING` presents a confirm naming the block and stating that quitting will not pause it. `Pause & Quit` is the default action, so `Return` is the safe choice. There is no confirm from `IDLE`, `PAUSED`, or `AWAITING_DECISION`.
+**Quitting (D16, was D14).** There is no confirmation. Quit parks a running block and exits; the park is written before the process goes away. The confirm this replaces existed to make the cost of quitting visible, and D16 removed the cost.
 
 **Relaunch and first run (D12).** A second launch of an already-running instance opens the popover rather than merely focusing an invisible app. On the very first run only, a panel points at the menu bar item and explains that TimeBox has no Dock icon; it is dismissible and never shown again.
 
@@ -459,8 +467,9 @@ Not adopted, for three reasons: the handoff specified Tauri explicitly; the app 
 |---|---|
 | Mac sleeps past `endAt` | On wake, resolve to `AWAITING_DECISION` before rendering |
 | App quit while `AWAITING_DECISION` | Restored on next launch, still awaiting decision |
-| App quit while `RUNNING`, restarted after `endAt` | `AWAITING_DECISION` |
-| App quit while `RUNNING`, restarted before `endAt` | Resume `RUNNING` with correct remaining time |
+| App quit while `RUNNING` | Parked `PAUSED` at the instant of the quit, holding its remainder (D16). The gap is `idle_paused_ms`, never worked time — so the restart time no longer changes the outcome |
+| Force-quit or crash while `RUNNING` | No park was written: the block is still `RUNNING` and resolves on hydrate as before (`AWAITING_DECISION` if `endAt` has passed). The gap is credited as work, capped at the allocation |
+| Force-quit or crash while an idle span is open | The span comes back **open** and keeps accruing — paused is still paused whether or not the app is alive (D15) |
 | App quit while `PAUSED` | Restored `PAUSED` with identical remaining time |
 | Queue emptied while running | On decision, transition to `IDLE` with empty-state prompt (D5) |
 | Current task deleted | Block → `CANCELLED`, transition to `IDLE` |
@@ -479,7 +488,7 @@ Not adopted, for three reasons: the handoff specified Tauri explicitly; the app 
 | Mac sleeps through a break | Same recovery path as a work block — resolves to the break checkpoint on wake |
 | Quit during a break | Break block restored with correct remaining time, or its checkpoint if it expired |
 | Break extended repeatedly | Allowed and tracked; `On break` total is the visible feedback, no cap is enforced |
-| Quit while `RUNNING` | Confirm shown (D14); `Pause & Quit` holds the remainder, plain `Quit` lets the clock run on |
+| Quit while `RUNNING` | No confirm. The block is parked with its remainder (D16) |
 | Quit while `PAUSED` or at a checkpoint | No confirm — that state is restored exactly |
 | Checkpoint answered within 2 minutes of expiry | No staleness line; the gap is below the reporting floor |
 | Checkpoint left unanswered overnight | Staleness line shows the full elapsed time; `Away` accrues; no time is credited to any task |

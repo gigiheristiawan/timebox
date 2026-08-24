@@ -7,6 +7,11 @@ pub enum AppError {
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// A setting the app refuses to store rather than silently rewrite. The
+    /// message is the one the user sees.
+    #[error("{0}")]
+    Rejected(String),
 }
 
 /// Commands return a plain string to the webview. The webview never sees the

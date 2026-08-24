@@ -59,6 +59,14 @@ export interface Settings {
   menuBarShowTimer: boolean;
   /** The one-time panel pointing at the menu bar has been dismissed (D12). */
   firstRunDone: boolean;
+  /** The working window: when the user asserts they are at the desk
+   *  (IDLE_TIME §2). Milliseconds from *local* midnight, not instants.
+   *  A different quantity from `availableWorkMsPerDay`, which is how much of
+   *  the day they intend to give. */
+  workStartMs: number;
+  workEndMs: number;
+  /** Which weekdays the window applies to. Bitmask, Monday = bit 0. */
+  workingWeekdays: number;
 }
 
 /** All computed by `core::summary` in Rust. The UI formats these; it does not
@@ -80,8 +88,18 @@ export interface TopTask {
 export interface Today {
   workedMs: number;
   breakMs: number;
-  /** Time at unanswered checkpoints — neither work nor break (D13). */
+  /** Time at unanswered checkpoints — neither work nor break (D13).
+   *  A sub-view of `idleAwaitingMs`. */
   awayMs: number;
+  /** Working-window time that no running block covered (IDLE_TIME §3). */
+  idleMs: number;
+  /** The three causes; they sum to `idleMs` exactly. Shown in the report, not
+   *  in the popover — they are not peers of the total. */
+  idleAwaitingMs: number;
+  idlePausedMs: number;
+  idleUntrackedMs: number;
+  /** Work done outside the window. A signal, never subtracted from anything. */
+  outsideHoursMs: number;
   tasksCompleted: number;
   tasksPending: number;
   blocksCompleted: number;
@@ -125,6 +143,7 @@ export type Action =
   | { kind: "decideBreak"; ms: number; complete: boolean }
   | { kind: "endBreak" }
   | { kind: "extendBreak"; ms: number }
+  | { kind: "startBreak"; ms: number }
   | { kind: "addTask"; title: string; blockMs: number; priority: Priority }
   | { kind: "removeTask"; task: string }
   | { kind: "reorder"; moved: string; before: string };

@@ -199,3 +199,72 @@ fn the_parked_block_uniqueness_index_holds_through_persistence() {
         .unwrap();
     assert!(n <= 1, "the schema's partial unique index would have rejected more");
 }
+
+// ------------------------------------------------- Idle time (IDLE_TIME.md)
+
+#[test]
+fn an_open_idle_span_survives_a_quit_and_keeps_accruing() {
+    // D15/D16: quitting parks the block, and the app not running is exactly
+    // what idle measures — so the span must come back open, not closed at the
+    // moment of the quit.
+    let db = Db::in_memory().unwrap();
+    let app = App::hydrate(db, 0).unwrap();
+    { *app.machine.lock() = seeded(); }
+    app.dispatch(Event::SwitchTo { task: "A".into() }, 0).unwrap();
+    app.dispatch(Event::Pause, 10 * MIN).unwrap();
+
+    let reloaded = app.db.with(repo::load).unwrap();
+    let open = reloaded.open_idle.expect("the span is still accruing");
+    assert_eq!(open.started_at, 10 * MIN);
+    assert_eq!(open.reason, crate::core::model::IdleReason::Paused);
+    assert!(reloaded.idle_spans.is_empty(), "nothing has been banked yet");
+
+    // And resuming banks exactly that gap.
+    app.dispatch(Event::Resume, 40 * MIN).unwrap();
+    let banked = app.db.with(repo::load).unwrap();
+    assert!(banked.open_idle.is_none());
+    assert_eq!(banked.idle_spans.len(), 1);
+    assert_eq!(banked.idle_spans[0].ended_at, Some(40 * MIN));
+}
+
+#[test]
+fn the_open_span_index_holds_through_repeated_saves() {
+    // The schema allows only one open span. A save that inserted a new one
+    // before the previous one's ended_at landed would be rejected.
+    let db = Db::in_memory().unwrap();
+    let app = App::hydrate(db, 0).unwrap();
+    { *app.machine.lock() = seeded(); }
+    app.dispatch(Event::SwitchTo { task: "A".into() }, 0).unwrap();
+    for i in 1..=6 {
+        app.dispatch(Event::Pause, i * MIN).unwrap();
+        app.dispatch(Event::Resume, i * MIN + 30_000).unwrap();
+    }
+    let n: i64 = app
+        .db
+        .with(|c| c.query_row("SELECT COUNT(*) FROM idle_spans WHERE ended_at IS NULL", [], |r| r.get(0)))
+        .unwrap();
+    assert!(n <= 1, "the partial unique index would have rejected more");
+}
+
+#[test]
+fn the_window_is_empty_on_a_day_the_user_does_not_work() {
+    // D18. Resolving the weekday needs a timezone, which is why this lives in
+    // the shell and `core::summary` takes the answer as an argument.
+    use crate::db::settings::Settings;
+    let monday = day_start_ms(
+        chrono::NaiveDate::from_ymd_opt(2026, 8, 24)
+            .and_then(|d| d.and_hms_opt(12, 0, 0))
+            .map(|d| chrono::TimeZone::from_local_datetime(&chrono::Local, &d).earliest().unwrap().timestamp_millis())
+            .unwrap(),
+    );
+    let saturday = day_start_ms(monday + 5 * 24 * 3_600_000 + 12 * 3_600_000);
+
+    let weekdays_only = Settings::default(); // Mon–Fri, 09:00–18:00
+    let (start, end) = window_for(monday, &weekdays_only).expect("Monday is a working day");
+    assert_eq!(end - start, 9 * 3_600_000);
+    assert!(start > monday, "the window starts at 09:00, not at midnight");
+    assert_eq!(window_for(saturday, &weekdays_only), None);
+
+    let all_week = Settings { working_weekdays: 0b111_1111, ..weekdays_only };
+    assert!(window_for(saturday, &all_week).is_some(), "the weekend can be switched on");
+}

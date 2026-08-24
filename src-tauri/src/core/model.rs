@@ -63,6 +63,47 @@ pub enum TimerState {
     AwaitingDecision,
 }
 
+/// Why the timer was not running. Every in-window instant no block covered
+/// falls in exactly one of these, which is what makes the three sub-buckets
+/// sum to `idle_ms` (IDLE_TIME §3.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IdleReason {
+    /// At an open checkpoint — the existing `away_ms` (SPEC D13).
+    Awaiting,
+    /// Held in PAUSED, by the Pause control or by quitting (IDLE_TIME D16).
+    Paused,
+    /// No block at all: before the first, between blocks, after the last.
+    Untracked,
+}
+
+impl IdleReason {
+    /// The reason a span opened in `state` carries. `None` for `Running`,
+    /// which is the one state that is *not* idle.
+    pub fn of(state: TimerState) -> Option<Self> {
+        match state {
+            TimerState::Running => None,
+            TimerState::Idle => Some(IdleReason::Untracked),
+            TimerState::Paused => Some(IdleReason::Paused),
+            TimerState::AwaitingDecision => Some(IdleReason::Awaiting),
+        }
+    }
+}
+
+/// One interval the timer was not running. Banked on the transition rather
+/// than derived afterwards, for the same reason `away_ms` is (SPEC D13):
+/// after the fact a past `end_at` cannot tell a parked block from an
+/// unanswered one. `ended_at` is `None` while the span is still open — and it
+/// stays open across a quit, because the app not running is exactly what idle
+/// measures (IDLE_TIME D15).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdleSpan {
+    pub id: String,
+    pub started_at: Millis,
+    pub ended_at: Option<Millis>,
+    pub reason: IdleReason,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BlockKind {
     Work,
@@ -200,6 +241,9 @@ str_enum!(TimerState {
     AwaitingDecision => "AWAITING_DECISION",
 });
 str_enum!(BlockKind { Work => "WORK", Break => "BREAK" });
+str_enum!(IdleReason {
+    Awaiting => "AWAITING", Paused => "PAUSED", Untracked => "UNTRACKED",
+});
 str_enum!(BlockStatus {
     Planned => "PLANNED", Running => "RUNNING", Paused => "PAUSED",
     AwaitingDecision => "AWAITING_DECISION", Completed => "COMPLETED",
@@ -228,6 +272,9 @@ mod encoding_tests {
         }
         for v in [Priority::Low, Priority::Medium, Priority::High] {
             assert_eq!(Priority::parse(v.as_str()), Some(v));
+        }
+        for v in [IdleReason::Awaiting, IdleReason::Paused, IdleReason::Untracked] {
+            assert_eq!(IdleReason::parse(v.as_str()), Some(v));
         }
     }
 

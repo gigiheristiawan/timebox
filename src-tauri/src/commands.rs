@@ -1,9 +1,9 @@
-use crate::core::model::{Millis, Priority, TimerState};
+use crate::core::model::{Millis, Priority};
 use crate::core::summary::{summarize, Summary};
 use crate::core::timer_machine::{Event, MachineState};
 use crate::db::settings::Settings;
 use crate::error::AppResult;
-use crate::state::{day_start_ms, now_ms, App};
+use crate::state::{day_start_ms, now_ms, window_for, App};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::State;
@@ -42,11 +42,18 @@ fn snapshot_of(app: &App) -> Snapshot {
     #[cfg(not(target_os = "macos"))]
     let launch_at_login_active = settings.launch_at_login;
 
+    let day_start = day_start_ms(now);
     Snapshot {
         remaining_ms: state.remaining_ms(now),
         launch_at_login_active,
         staleness_ms: state.staleness_ms(now),
-        summary: summarize(&state, day_start_ms(now), now, settings.available_work_ms_per_day),
+        summary: summarize(
+            &state,
+            day_start,
+            now,
+            settings.available_work_ms_per_day,
+            window_for(day_start, &settings),
+        ),
         settings,
         state,
         now,
@@ -69,6 +76,7 @@ pub enum Action {
     DecideBreak { ms: Millis, complete: bool },
     EndBreak,
     ExtendBreak { ms: Millis },
+    StartBreak { ms: Millis },
     #[serde(rename_all = "camelCase")]
     AddTask { title: String, block_ms: Millis, priority: String },
     RemoveTask { task: String },
@@ -89,6 +97,7 @@ impl From<Action> for Event {
             Action::DecideBreak { ms, complete } => Event::DecideBreak { ms, complete },
             Action::EndBreak => Event::EndBreak,
             Action::ExtendBreak { ms } => Event::ExtendBreak { ms },
+            Action::StartBreak { ms } => Event::StartBreak { ms },
             Action::AddTask { title, block_ms, priority } => Event::AddTask {
                 title,
                 block_ms,
@@ -148,6 +157,12 @@ pub fn update_settings(
     handle: tauri::AppHandle,
     settings: Settings,
 ) -> AppResult<Snapshot> {
+    // Refused rather than clamped: an overnight window is a different feature,
+    // and silently rewriting what the user typed would be worse than saying no
+    // (IDLE_TIME §8).
+    if let Some(why) = settings.rejection() {
+        return Err(crate::error::AppError::Rejected(why));
+    }
     let stored = app.set_settings(&settings)?;
 
     crate::platform::tray::set_show_timer(stored.menu_bar_show_timer);
@@ -222,34 +237,23 @@ pub fn close_popover(handle: tauri::AppHandle) {
     crate::platform::popover::hide(&handle);
 }
 
-/// Quitting is never blocked — the confirm exists to make the cost visible, not
-/// to prevent it (SPEC D14). `end_at` is absolute, so a plain quit keeps the
-/// block running; hydrate resolves it on the next launch.
-///
-/// From IDLE, PAUSED, or a checkpoint there is nothing to warn about: the first
-/// two hold no live allocation and a checkpoint is restored intact.
+/// Quitting is never confirmed and never blocked (IDLE_TIME §9.1). D14's
+/// dialog existed to make the cost of quitting visible; D16 removes the cost,
+/// so there is nothing left to warn about.
 #[tauri::command]
 pub fn request_quit(app: State<'_, Arc<App>>, handle: tauri::AppHandle) {
-    if app.snapshot().timer_state == TimerState::Running {
-        crate::platform::quit_confirm::show(&handle);
-    } else {
-        handle.exit(0);
-    }
-}
-
-/// The answer to that confirm. `pause` holds the remainder first, which is the
-/// only way to stop the clock consuming the block while the app is closed.
-#[tauri::command]
-pub fn confirm_quit(app: State<'_, Arc<App>>, handle: tauri::AppHandle, pause: bool) {
-    if pause {
-        if let Err(e) = app.dispatch(Event::Pause, now_ms()) {
-            eprintln!("[timebox] could not pause before quitting: {e}");
-        }
-    }
+    park_for_quit(&app);
     handle.exit(0);
 }
 
-#[tauri::command]
-pub fn cancel_quit(handle: tauri::AppHandle) {
-    crate::platform::quit_confirm::hide(&handle);
+/// Quitting *is* a pause (IDLE_TIME D16): it banks the remainder exactly as the
+/// Pause control does, so the interval the app is closed is idle and not work.
+///
+/// `dispatch` writes the whole state before it returns, so the park is durable
+/// by the time the process goes away. `Pause` is already a no-op from IDLE, from
+/// PAUSED and at a checkpoint, which is the right answer for quitting from each.
+pub fn park_for_quit(app: &App) {
+    if let Err(e) = app.dispatch(Event::Pause, now_ms()) {
+        eprintln!("[timebox] could not park the block before quitting: {e}");
+    }
 }

@@ -59,6 +59,17 @@ pub fn save(conn: &mut Connection, state: &MachineState, now: Millis) -> rusqlit
         )?;
     }
 
+    // Closed spans first: the partial unique index allows only one open span,
+    // and writing a newly opened one before the previous one's `ended_at`
+    // lands would trip it.
+    for sp in state.idle_spans.iter().chain(state.open_idle.iter()) {
+        tx.execute(
+            "INSERT INTO idle_spans (id, started_at, ended_at, reason) VALUES (?1,?2,?3,?4)
+             ON CONFLICT(id) DO UPDATE SET ended_at=excluded.ended_at",
+            params![sp.id, sp.started_at, sp.ended_at, sp.reason.as_str()],
+        )?;
+    }
+
     tx.execute(
         "UPDATE app_state SET timer_state=?1, current_block_id=?2, updated_at=?3 WHERE id=1",
         params![state.timer_state.as_str(), state.current_block_id, now],
@@ -139,6 +150,32 @@ pub fn load(conn: &Connection) -> rusqlite::Result<MachineState> {
         }
     }
 
+    let mut idle_spans = Vec::new();
+    let mut open_idle = None;
+    {
+        let mut stmt = conn.prepare(
+            "SELECT id, started_at, ended_at, reason FROM idle_spans ORDER BY started_at",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let reason: String = r.get(3)?;
+            Ok(IdleSpan {
+                id: r.get(0)?,
+                started_at: r.get(1)?,
+                ended_at: r.get(2)?,
+                reason: IdleReason::parse(&reason).unwrap_or(IdleReason::Untracked),
+            })
+        })?;
+        for sp in rows {
+            let sp = sp?;
+            // An open span survives a quit deliberately: the app not running is
+            // exactly what idle measures (IDLE_TIME D15).
+            match sp.ended_at {
+                Some(_) => idle_spans.push(sp),
+                None => open_idle = Some(sp),
+            }
+        }
+    }
+
     let (timer_state, current_block_id): (String, Option<String>) = conn
         .query_row(
             "SELECT timer_state, current_block_id FROM app_state WHERE id = 1",
@@ -154,5 +191,7 @@ pub fn load(conn: &Connection) -> rusqlite::Result<MachineState> {
         blocks,
         queue: queue.into_iter().map(|(_, id)| id).collect(),
         current_block_id,
+        idle_spans,
+        open_idle,
     })
 }

@@ -36,6 +36,32 @@ pub fn day_start_ms(now: Millis) -> Millis {
         .unwrap_or(now - now.rem_euclid(86_400_000))
 }
 
+/// The working window on the day beginning at `day_start`, as a pair of
+/// absolute instants — or `None` when that weekday is not a working day, which
+/// is the whole of IDLE_TIME D18: a weekend is a day whose window is empty.
+///
+/// Resolved here rather than in the core for the same reason `day_start_ms` is:
+/// a weekday and a local wall-clock time need a timezone, which is a shell
+/// concern. `core::summary` takes the answer as an argument.
+pub fn window_for(day_start: Millis, s: &Settings) -> Option<(Millis, Millis)> {
+    use chrono::{Datelike, Duration, Local, TimeZone};
+
+    let date = Local.timestamp_millis_opt(day_start).single()?.date_naive();
+    if s.working_weekdays & (1 << date.weekday().num_days_from_monday()) == 0 {
+        return None;
+    }
+    // Built as a local wall-clock time rather than `day_start + offset`, so a
+    // DST day's window still starts at 09:00 by the clock on the wall.
+    let at = |ms: Millis| -> Millis {
+        date.and_hms_opt(0, 0, 0)
+            .and_then(|midnight| Local.from_local_datetime(&(midnight + Duration::milliseconds(ms))).earliest())
+            .map(|dt| dt.timestamp_millis())
+            .unwrap_or(day_start + ms)
+    };
+    let (start, end) = (at(s.work_start_ms), at(s.work_end_ms));
+    (start < end).then_some((start, end))
+}
+
 struct UuidIds;
 
 impl IdSource for UuidIds {
