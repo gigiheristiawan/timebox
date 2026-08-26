@@ -71,7 +71,16 @@ pub enum Event {
     RemoveTask { task: TaskId },
     /// Adding never starts anything — the user chooses when work begins.
     AddTask { title: String, block_ms: Millis, priority: Priority },
-    /// Drag-and-drop reorder: place `moved` immediately before `before`.
+    /// Rename and re-prioritise. Never touches the block: a task's allocation
+    /// is the timer's business, and editing one mid-block must not re-grant
+    /// time the way a fresh block would.
+    EditTask { task: TaskId, title: String, priority: Priority },
+    /// Grant a task more time: `ms` is *added*, never assigned. There is no way
+    /// to shorten an allocation from here — trimming a running block would let
+    /// a checkpoint be reached early and dodged, and trimming a parked one
+    /// would rewrite time already promised.
+    AddTime { task: TaskId, ms: Millis },
+    /// Drag-and-drop reorder: `moved` takes the place `before` holds.
     Reorder { moved: TaskId, before: TaskId },
 }
 
@@ -315,6 +324,52 @@ pub fn reduce(
                 t.priority = priority;
                 state.queue.push(t.id.clone());
                 state.tasks.push(t);
+            }
+        }
+
+        Event::EditTask { task, title, priority } => {
+            let title = title.trim().to_string();
+            // A blank title is rejected outright rather than half-applied:
+            // AddTask refuses one, so an edit cannot be the way to get one.
+            if !title.is_empty() {
+                if let Some(t) = state.task_mut(&task) {
+                    t.title = title;
+                    t.priority = priority;
+                }
+            }
+        }
+
+        Event::AddTime { task, ms } => {
+            if ms > 0 {
+                if let Some(t) = state.task_mut(&task) {
+                    t.block_duration_ms += ms;
+                }
+                // The live block, if this task holds one, so the grant applies
+                // now rather than only to the task's next block. A checkpoint is
+                // excluded: that block belongs to the decision, and `Extend` is
+                // how the checkpoint grants time — this must not be a way around
+                // answering it.
+                let live = if state.timer_state == TimerState::AwaitingDecision {
+                    None
+                } else {
+                    state
+                        .current_block()
+                        .filter(|b| b.task_id.as_ref() == Some(&task))
+                        .map(|b| b.id.clone())
+                        .or_else(|| state.parked_for(&task).map(|b| b.id.clone()))
+                };
+                if let Some(id) = live {
+                    if let Some(b) = state.block_mut(&id) {
+                        b.extension_ms += ms;
+                        if b.status == BlockStatus::Running {
+                            // Pushed forward, never recomputed from `now`: the
+                            // time already burnt stays burnt.
+                            b.end_at = b.end_at.map(|e| e + ms);
+                        } else if let Some(left) = b.remaining_when_paused_ms {
+                            b.remaining_when_paused_ms = Some(left + ms);
+                        }
+                    }
+                }
             }
         }
 

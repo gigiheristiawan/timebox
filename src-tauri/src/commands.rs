@@ -78,7 +78,11 @@ pub enum Action {
     ExtendBreak { ms: Millis },
     StartBreak { ms: Millis },
     #[serde(rename_all = "camelCase")]
-    AddTask { title: String, block_ms: Millis, priority: String },
+    AddTask { title: String, block_ms: Millis, priority: Priority },
+    #[serde(rename_all = "camelCase")]
+    EditTask { task: String, title: String, priority: Priority },
+    #[serde(rename_all = "camelCase")]
+    AddTime { task: String, ms: Millis },
     RemoveTask { task: String },
     Reorder { moved: String, before: String },
 }
@@ -98,11 +102,13 @@ impl From<Action> for Event {
             Action::EndBreak => Event::EndBreak,
             Action::ExtendBreak { ms } => Event::ExtendBreak { ms },
             Action::StartBreak { ms } => Event::StartBreak { ms },
-            Action::AddTask { title, block_ms, priority } => Event::AddTask {
-                title,
-                block_ms,
-                priority: Priority::parse(&priority).unwrap_or(Priority::Medium),
-            },
+            // Deserialized straight into `Priority` rather than parsed from a
+            // String: `Priority::parse` reads the *database* encoding (`HIGH`),
+            // the UI sends the serde one (`High`), so every task silently
+            // landed on the `unwrap_or` and stored MEDIUM.
+            Action::AddTask { title, block_ms, priority } => Event::AddTask { title, block_ms, priority },
+            Action::EditTask { task, title, priority } => Event::EditTask { task, title, priority },
+            Action::AddTime { task, ms } => Event::AddTime { task, ms },
             Action::RemoveTask { task } => Event::RemoveTask { task },
             Action::Reorder { moved, before } => Event::Reorder { moved, before },
         }
@@ -255,5 +261,26 @@ pub fn request_quit(app: State<'_, Arc<App>>, handle: tauri::AppHandle) {
 pub fn park_for_quit(app: &App) {
     if let Err(e) = app.dispatch(Event::Pause, now_ms()) {
         eprintln!("[timebox] could not park the block before quitting: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The UI's wire encoding for a priority is serde's, not the database's.
+    /// A wrong one here does not fail — it quietly makes every task Medium.
+    #[test]
+    fn add_task_carries_the_priority_the_ui_sent() {
+        for (sent, want) in [("High", Priority::High), ("Medium", Priority::Medium), ("Low", Priority::Low)] {
+            let json = format!(
+                r#"{{"kind":"addTask","title":"t","blockMs":900000,"priority":"{sent}"}}"#
+            );
+            let action: Action = serde_json::from_str(&json).expect("the UI's shape must deserialize");
+            match Event::from(action) {
+                Event::AddTask { priority, .. } => assert_eq!(priority, want),
+                e => panic!("expected AddTask, got {e:?}"),
+            }
+        }
     }
 }

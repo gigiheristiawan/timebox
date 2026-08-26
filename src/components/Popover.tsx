@@ -4,6 +4,7 @@ import { clockStr, durStr } from "../core/format";
 import { openMainWindow, openSettingsWindow, requestQuit } from "../ipc/commands";
 import { breakDefaultMs, currentBlock, currentTask, isBreak, parkedFor, taskById, useTimebox } from "../stores/useTimebox";
 import { Countdown } from "./Countdown";
+import { PriorityDot } from "./ui";
 
 /** Matches `.popover` in docs/mockup.html — the design reference for this window. */
 const WIDTH = 300;
@@ -158,11 +159,12 @@ export function Popover() {
               key={id}
               type="button"
               onClick={() => send({ kind: "switchTo", task: id })}
-              className={`flex w-full items-baseline gap-2 py-[2.5px] text-left text-[12.5px] ${
+              className={`flex w-full items-center gap-2 py-[2.5px] text-left text-[12.5px] ${
                 current ? "font-semibold text-ink" : "text-ink-2 hover:text-ink"
               }`}
             >
               <span className="w-3 flex-none text-accent">{current ? "→" : ""}</span>
+              <PriorityDot priority={t.priority} />
               <span className="truncate">{t.title}</span>
               <span className="tabular ml-auto flex-none pl-2 font-mono text-[11px] text-ink-3">
                 {parked?.remainingWhenPausedMs != null

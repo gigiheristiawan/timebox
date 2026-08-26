@@ -1,10 +1,13 @@
+import { useState } from "react";
 import { durStr } from "../core/format";
 import { useTimebox, currentBlock, currentTask, isBreak, taskById } from "../stores/useTimebox";
 import { Countdown } from "./Countdown";
-import { Button, Chip, SectionLabel } from "./ui";
+import { Button, Chip, PriorityDot, SectionLabel } from "./ui";
+import { TaskEditor } from "./TaskEditor";
 
 export function CurrentPanel() {
   const { snap, send } = useTimebox();
+  const [editing, setEditing] = useState(false);
   if (!snap) return null;
 
   const block = currentBlock(snap);
@@ -64,8 +67,23 @@ export function CurrentPanel() {
     <section className="flex flex-col gap-3">
       <SectionLabel>Current task</SectionLabel>
       <div className="flex items-start gap-[14px]">
-        <div className="flex flex-col gap-[7px]">
-          <h2 className="text-[19px] font-semibold leading-[1.25] tracking-[-0.01em]">{task.title}</h2>
+        <div className="flex min-w-0 flex-1 flex-col gap-[7px]">
+          {editing ? (
+            <TaskEditor task={task} onDone={() => setEditing(false)} />
+          ) : (
+            <h2 className="group flex items-center gap-2 text-[19px] font-semibold leading-[1.25] tracking-[-0.01em]">
+              <PriorityDot priority={task.priority} />
+              <span className="min-w-0 truncate">{task.title}</span>
+              <button
+                type="button"
+                title="Rename or re-prioritise"
+                onClick={() => setEditing(true)}
+                className="text-[13px] font-normal text-ink-3 opacity-0 transition-opacity hover:text-accent group-hover:opacity-100"
+              >
+                ✎
+              </button>
+            </h2>
+          )}
           <div className="flex flex-wrap gap-1.5">
             <Chip tone="accent">Block {blockNumber} · {durStr(block.plannedMs)}</Chip>
             {block.extensionMs > 0 && <Chip tone="warn">Extended +{durStr(block.extensionMs)}</Chip>}

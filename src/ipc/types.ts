@@ -145,5 +145,7 @@ export type Action =
   | { kind: "extendBreak"; ms: number }
   | { kind: "startBreak"; ms: number }
   | { kind: "addTask"; title: string; blockMs: number; priority: Priority }
+  | { kind: "editTask"; task: string; title: string; priority: Priority }
+  | { kind: "addTime"; task: string; ms: number }
   | { kind: "removeTask"; task: string }
   | { kind: "reorder"; moved: string; before: string };
