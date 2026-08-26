@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Date (WIB)       | Change                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-08-26 12:20 | **Rule 19 added** — the `claude.ai/code/session_…` link never leaves the terminal. It went into both commits on PR #5 and the PR body, where it reads as Gigih's link on Gigih's repo and is permanent. `Co-Authored-By` is the whole of the attribution. |
 | 2026-08-26 12:05 | **Rule 18 added** — ask every time before acting as Gigih. PR #5 was pushed and opened with his `gh` token without asking first; `skills/create_git_commit.md` said not to push, and "create the PR" was read as covering it. Approval is per-act and never generalises. |
 | 2026-08-26 11:25 | **Priority was never stored, and tasks are now editable.** `Action::AddTask` carried `priority` as a `String` through `Priority::parse` — which reads the DB encoding (`HIGH`) while the UI sends serde's (`High`) — so the `unwrap_or` made *every* task `MEDIUM`. The field is typed `Priority` now, with `commands::tests` pinning the wire encoding. New `Event::EditTask` (title + priority, blank refused whole, block untouched) and `Event::AddTime` (grants only — `+5/+10/+15`, applied to the task *and* its live block, refused at a checkpoint) behind `components/TaskEditor.tsx`, used by the queue row and the current task. |
 | 2026-08-26 11:05 | **Queue drag-to-reorder fixed, and the priority dot made legible.** Two independent causes for the dead drag: Tauri's `dragDropEnabled` defaults to *true* and the OS drag handler swallows HTML5 DnD (now `false` on the `main` window), and WebKit will not start a drag whose `dataTransfer` carries no payload. `queue::move_before` now reads the target's index **before** lifting the row out, so a downward drag moves. `PriorityDot` in `components/ui.tsx` is shared by the queue and the popover — which showed no priority at all — at 7px, with Low hollow. |
@@ -184,6 +185,16 @@ acting as him.
 
 When the answer is no, or has not come yet, stop at the last local step —
 commit, but do not push — and hand over the exact command for him to run.
+
+### Rule 19 - Never publish the session link
+
+Do not put the `claude.ai/code/session_…` link anywhere that leaves this
+terminal: commit messages, PR and issue bodies, comments, docs, code. Not as a
+trailer, not as a footer, not "for traceability".
+
+It reads as Gigih's own link on his repo, it is meaningless to anyone who opens
+it, and it outlives the session in a permanent public record. `Co-Authored-By:
+Claude` is the whole of the attribution that belongs there.
 
 ## Commands
 
