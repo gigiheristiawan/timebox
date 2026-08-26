@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Date (WIB)       | Change                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-08-26 12:05 | **Rule 18 added** — ask every time before acting as Gigih. PR #5 was pushed and opened with his `gh` token without asking first; `skills/create_git_commit.md` said not to push, and "create the PR" was read as covering it. Approval is per-act and never generalises. |
 | 2026-08-26 11:25 | **Priority was never stored, and tasks are now editable.** `Action::AddTask` carried `priority` as a `String` through `Priority::parse` — which reads the DB encoding (`HIGH`) while the UI sends serde's (`High`) — so the `unwrap_or` made *every* task `MEDIUM`. The field is typed `Priority` now, with `commands::tests` pinning the wire encoding. New `Event::EditTask` (title + priority, blank refused whole, block untouched) and `Event::AddTime` (grants only — `+5/+10/+15`, applied to the task *and* its live block, refused at a checkpoint) behind `components/TaskEditor.tsx`, used by the queue row and the current task. |
 | 2026-08-26 11:05 | **Queue drag-to-reorder fixed, and the priority dot made legible.** Two independent causes for the dead drag: Tauri's `dragDropEnabled` defaults to *true* and the OS drag handler swallows HTML5 DnD (now `false` on the `main` window), and WebKit will not start a drag whose `dataTransfer` carries no payload. `queue::move_before` now reads the target's index **before** lifting the row out, so a downward drag moves. `PriorityDot` in `components/ui.tsx` is shared by the queue and the popover — which showed no priority at all — at 7px, with Low hollow. |
 | 2026-08-24 19:10 | **The UI refreshes while the timer is stopped.** `timebox://changed` now also fires on window focus, and `useTimebox` polls every 10s when `timerState !== "Running"`. The tick loop is the only time-driven nudge and it parks in `IDLE`/`PAUSED`/`AWAITING_DECISION` — the exact states in which `idleMs` and `stalenessMs` grow. |
@@ -163,6 +164,26 @@ A long instruction block is unfollowable — the thread gets lost and none of it
 Do not pad a reply that contains steps with optional extras, "while you're there" asides, "worth knowing" caveats, or offers of further work. Those enlarge the pile even when they are not themselves steps. Hold them until asked.
 
 The same applies to scripts: one that prints a ten-point checklist has just moved the problem. Have him run one thing and report back.
+
+### Rule 18 - Ask before acting as Gigih
+
+Anything that reaches the outside world under Gigih's identity or credentials
+needs his explicit go-ahead **for that specific act, every time**. Ask, name what
+will be run and where it lands, and wait for the answer.
+
+This covers `git push`, `gh pr create` / `gh pr comment` / `gh issue` writes, any
+`gh api` call that is not a read, releases and tags, and the same shape anywhere
+else — an authenticated CLI, an API token in the environment, a signing
+identity, a deploy. The test is not "is this dangerous" but "would GitHub, or
+anyone reading the result, see Gigih did it".
+
+Approval never generalises. "Create the PR" authorises that PR, not the next
+push; a token already sitting in the keyring is not consent, it is only means.
+Assume every credential on this machine belongs to him and that using one is
+acting as him.
+
+When the answer is no, or has not come yet, stop at the last local step —
+commit, but do not push — and hand over the exact command for him to run.
 
 ## Commands
 
