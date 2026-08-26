@@ -3,8 +3,9 @@
 How to produce a distributable TimeBox build. Phase 8 of
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Current state:** **0.1.0 is published**, and **0.2.0 is in flight** — version
-bumped, notes written, a signed/notarized/stapled universal DMG verified clean.
+**Current state:** **0.1.0 and 0.2.0 are published**, and **0.3.0 is in flight** —
+version bumped (build 4), notes written; the signed/notarized build has not been
+made yet.
 The 0.1.0 DMG is attached to the [v0.1.0
 release](https://github.com/gigiheristiawan/timebox/releases/tag/v0.1.0) and the
 landing page is live at <https://gigiheristiawan.github.io/timebox/>. Everything
@@ -17,6 +18,7 @@ Pages) is done and marked as such where it appears.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-26 13:05 | 0.3.0 bumped: the five files of §0 plus `CFBundleVersion` 3 → **4**. Notes in `docs/release-notes/0.3.0.md`. No migration in this release. |
 | 2026-08-24 20:15 | **§0 added — the version bump**, which was the one release step this runbook never wrote down: five files, and `CFBundleVersion` moves independently of the marketing version. Settings now shows the version, inlined from `tauri.conf.json` at build time, so it needs no separate edit. §6 made version-agnostic (`VERSION=` rather than a literal `0.1.0`), and its Pages block marked one-time-and-done. Recorded the 0.2.0 run: building in a shell without the §3 exports produced an **ad-hoc, linker-signed** app — `flags=0x20002(adhoc,linker-signed)`, `TeamIdentifier=not set` — which is the app-level failure shape §3 already names. |
 | 2026-08-21 16:40 | §7 now points at `appstore/INDEX.md` for the listing side of a submission — copy, screenshots, privacy answers, review notes — which is separate from building the package. 0.1.0 build 2 submitted for review. |
 | 2026-08-21 15:20 | §7.3: **ITMS-91109** — the provisioning profile carries `com.apple.quarantine` from the browser download, and `cp` preserves it; one quarantined file rejects the whole submission, reported only by email ~20 min after a *successful* upload. `build-mas.sh` now runs `xattr -cr` before signing and asserts none survives. Also: `CFBundleVersion` must increase on every upload, a failed delivery included. |
