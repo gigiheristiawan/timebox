@@ -469,6 +469,86 @@ fn a_blank_or_zero_length_task_is_rejected() {
 }
 
 #[test]
+fn editing_a_task_renames_and_reprioritises_it_without_touching_its_block() {
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::EditTask {
+        task: "A".into(),
+        title: "  Draft the release notes  ".into(),
+        priority: Priority::High,
+    }, 5 * MIN, &mut ids);
+
+    let t = s.tasks.iter().find(|t| t.id == "A").unwrap();
+    assert_eq!(t.title, "Draft the release notes", "title is trimmed, as on add");
+    assert_eq!(t.priority, Priority::High);
+    // An edit is not an allocation: renaming the running task mid-block must
+    // not hand it a fresh 30 minutes, which is the D10 anti-gaming rule.
+    assert_eq!(s.remaining_ms(5 * MIN), 25 * MIN);
+    assert_eq!(s.timer_state, TimerState::Running);
+}
+
+#[test]
+fn an_edit_cannot_blank_a_title() {
+    let (s, mut ids) = day();
+    let s = fire(s, Event::EditTask { task: "A".into(), title: "   ".into(), priority: Priority::High }, 0, &mut ids);
+    let t = s.tasks.iter().find(|t| t.id == "A").unwrap();
+    assert_eq!(t.title, "Fix attendance bug", "the blank edit was refused whole");
+    assert_eq!(t.priority, Priority::Medium, "including the priority that rode with it");
+
+    // An unknown task is a no-op, not a panic.
+    let s = fire(s, Event::EditTask { task: "Z".into(), title: "x".into(), priority: Priority::Low }, 0, &mut ids);
+    assert_eq!(s.tasks.len(), 4);
+}
+
+#[test]
+fn adding_time_grows_the_running_block_without_resetting_what_was_burnt() {
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::AddTime { task: "A".into(), ms: 10 * MIN }, 20 * MIN, &mut ids);
+
+    // 10 of the 30 were left; the grant adds to that, it does not restart it.
+    assert_eq!(s.remaining_ms(20 * MIN), 20 * MIN);
+    assert_eq!(s.current_block().unwrap().extension_ms, 10 * MIN);
+    // The task's own allocation grows too, so its *next* block is 40m as well.
+    let t = s.tasks.iter().find(|t| t.id == "A").unwrap();
+    assert_eq!(t.block_duration_ms, 40 * MIN);
+}
+
+#[test]
+fn adding_time_to_a_parked_task_grows_the_remainder_it_will_resume_with() {
+    let (s, mut ids) = start_a(0);
+    // Switch away at 25m: A parks holding 5m.
+    let s = fire(s, Event::SwitchTo { task: "B".into() }, 25 * MIN, &mut ids);
+    assert_eq!(s.parked_for(&"A".to_string()).unwrap().remaining_when_paused_ms, Some(5 * MIN));
+
+    let s = fire(s, Event::AddTime { task: "A".into(), ms: 15 * MIN }, 26 * MIN, &mut ids);
+    assert_eq!(
+        s.parked_for(&"A".to_string()).unwrap().remaining_when_paused_ms,
+        Some(20 * MIN),
+        "the grant lands on the remainder the task will resume with",
+    );
+    let s = fire(s, Event::SwitchTo { task: "A".into() }, 30 * MIN, &mut ids);
+    assert_eq!(s.remaining_ms(30 * MIN), 20 * MIN, "and is what the resumed block runs on");
+}
+
+#[test]
+fn adding_time_is_refused_at_a_checkpoint_and_never_shortens_anything() {
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+    assert_eq!(s.timer_state, TimerState::AwaitingDecision);
+
+    // Extend is the checkpoint's own grant and it costs a decision. Handing out
+    // time from the editor instead would be a way around answering.
+    let s = fire(s, Event::AddTime { task: "A".into(), ms: 10 * MIN }, 31 * MIN, &mut ids);
+    assert_eq!(s.timer_state, TimerState::AwaitingDecision, "still owed a decision");
+    assert_eq!(s.current_block().unwrap().extension_ms, 0, "the block is untouched");
+
+    // Nothing subtracts. A zero or negative grant is a no-op, not a trim.
+    let (s2, mut ids2) = start_a(0);
+    let before = s2.clone();
+    let s2 = fire(s2, Event::AddTime { task: "A".into(), ms: -10 * MIN }, 5 * MIN, &mut ids2);
+    assert_eq!(s2, before, "a negative grant changes nothing");
+}
+
+#[test]
 fn adding_while_running_does_not_disturb_the_current_block() {
     let (s, mut ids) = start_a(0);
     let before = s.current_block().unwrap().clone();
@@ -490,6 +570,14 @@ fn reordering_moves_a_task_before_another() {
     assert_eq!(s.queue, vec!["A", "D", "B", "C"]);
     let s = fire(s, Event::Reorder { moved: "Z".into(), before: "B".into() }, 0, &mut ids);
     assert_eq!(s.queue, vec!["A", "D", "B", "C"]);
+
+    // Dragging *downwards* has to move the row too. Deriving the insert point
+    // after lifting the row out would land it back where it started — the drag
+    // would look broken rather than wrong.
+    let s = fire(s, Event::Reorder { moved: "A".into(), before: "D".into() }, 0, &mut ids);
+    assert_eq!(s.queue, vec!["D", "A", "B", "C"]);
+    let s = fire(s, Event::Reorder { moved: "D".into(), before: "C".into() }, 0, &mut ids);
+    assert_eq!(s.queue, vec!["A", "B", "C", "D"], "a drag onto the last row lands last");
 }
 
 // ------------------------------------------- Phase 7: away time and summary

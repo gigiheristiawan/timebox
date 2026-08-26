@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { Priority } from "../ipc/types";
 
 export function SectionLabel({ children }: { children: ReactNode }) {
   return (
@@ -43,5 +44,26 @@ export function Button({
       {children}
       {hint && <span className="ml-[5px] font-mono text-[10px] opacity-55">{hint}</span>}
     </button>
+  );
+}
+
+/**
+ * The priority marker, shared by the queue and the popover so one task cannot
+ * read as two priorities. Colour alone was not enough at 5px — `warn` and
+ * `ink-3` are both muted greens in this palette — so Low is drawn hollow: the
+ * three are separable by shape as well as by hue.
+ */
+export function PriorityDot({ priority }: { priority: Priority }) {
+  const look = {
+    High: "bg-alert",
+    Medium: "bg-warn",
+    Low: "bg-transparent border border-line-2",
+  }[priority];
+  return (
+    <span
+      title={`${priority} priority`}
+      aria-label={`${priority} priority`}
+      className={`h-[7px] w-[7px] shrink-0 rounded-full ${look}`}
+    />
   );
 }

@@ -21,16 +21,20 @@ pub fn remove(queue: &mut Vec<TaskId>, id: &TaskId) {
     queue.retain(|t| t != id);
 }
 
-/// Reorder by drag-and-drop: place `moved` immediately before `before`.
+/// Reorder by drag-and-drop: `moved` takes the place `before` currently holds,
+/// and `before` shifts aside. The target's index is read *before* `moved` is
+/// lifted out, which is what makes a downward drag do something: computing it
+/// afterwards puts the row back exactly where it started, because removing a
+/// row above the target pulls the target up by one.
 pub fn move_before(queue: &mut Vec<TaskId>, moved: &TaskId, before: &TaskId) {
     if moved == before || !queue.contains(moved) {
         return;
     }
+    let Some(at) = queue.iter().position(|t| t == before) else {
+        return;
+    };
     queue.retain(|t| t != moved);
-    match queue.iter().position(|t| t == before) {
-        Some(i) => queue.insert(i, moved.clone()),
-        None => queue.push(moved.clone()),
-    }
+    queue.insert(at.min(queue.len()), moved.clone());
 }
 
 pub fn head(queue: &[TaskId]) -> Option<&TaskId> {
