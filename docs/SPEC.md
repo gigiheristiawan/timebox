@@ -12,6 +12,7 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 
 | Date (WIB)       | Change                                                                                                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-08-27 09:40 | **§7.2 — the popover gains a `Complete` button**, alongside `Pause` and `Skip`. It dispatches the same `CompleteCurrentTask` action the main window's button does. Closes issue #7: finishing a task was the one everyday operation that forced the main window open, against §7.2's "normal daily usage must be fully possible from the popover alone". |
 | 2026-08-26 11:25 | **Tasks can be renamed, re-prioritised and granted more time** — new `Event::EditTask` and `Event::AddTime`, an inline editor on the queue row and on the current task (§7.3). Time is added, never assigned, and a grant is refused at a checkpoint where `Extend` already owns that decision. Also fixes the priority that never arrived — `Action::AddTask` took `priority` as a `String` and ran it through `Priority::parse`, which reads the *database* encoding (`HIGH`) while the UI sends serde's (`High`), so every task ever added stored `MEDIUM`. |
 | 2026-08-24 16:40 | **§6 reversal landed, and D14 is superseded.** Quitting now parks the running block — `commands::request_quit` and `RunEvent::ExitRequested` both dispatch the existing `Event::Pause`, so the interval the app is closed reads as idle, not work (IDLE_TIME D16). The quit confirmation and its window are deleted: they existed to make the cost of quitting visible and there is no cost left. §6's paragraph is replaced rather than annotated, D14 is struck, §7.4's confirm paragraph and §11's quit rows are rewritten. D21 (sleep) is still pending and unaffected. |
 | 2026-08-24 11:20 | **§6 amended — pending reversal of "quitting does not stop the clock".** `docs/features/IDLE_TIME.md` (D16) parks the running block on quit, and `docs/features/SLEEP_DETECTION.md` (D21) does the same for a detected sleep, so that measured idle time and measured work can never claim the same interval. The paragraph and the sleep/wake bullet below are marked with what replaces them; neither is implemented yet, so the body still describes shipped behaviour. |
@@ -294,7 +295,7 @@ If `menuBarShowTimer` is false, show the icon only and put the timer in the popo
 Compact, ~320px wide:
 - Current task title + large countdown
 - Next task preview
-- `Pause` / `Skip` buttons
+- `Pause` / `Skip` / `Complete` buttons — `Complete` sends the same `CompleteCurrentTask` the main window's button does, so a task can be finished without opening the app
 - Divider
 - Today's queue (first 4–5 entries, current marked `→`)
 - Divider

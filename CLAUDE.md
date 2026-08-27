@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Date (WIB)       | Change                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-08-27 09:40 | The popover's current-task row now offers **Complete** next to Pause and Skip (`components/Popover.tsx`), sending the same `completeCurrentTask` action as the main window (issue #7). No backend change — `Event::CompleteCurrentTask` already handled it. `docs/SPEC.md` §7.2 updated. |
 | 2026-08-26 12:40 | Rules 18 and 19 moved out of this file into `skills/create_git_commit.md`, where the rest of the git rules already live. Rule 15 points at it. |
 | 2026-08-26 12:20 | **Rule 19 added** — the `claude.ai/code/session_…` link never leaves the terminal. It went into both commits on PR #5 and the PR body, where it reads as Gigih's link on Gigih's repo and is permanent. `Co-Authored-By` is the whole of the attribution. |
 | 2026-08-26 12:05 | **Rule 18 added** — ask every time before acting as Gigih. PR #5 was pushed and opened with his `gh` token without asking first; `skills/create_git_commit.md` said not to push, and "create the PR" was read as covering it. Approval is per-act and never generalises. |
