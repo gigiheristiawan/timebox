@@ -109,6 +109,7 @@ export function Popover() {
                 {paused ? "Resume" : "Pause"}
               </PopButton>
               <PopButton onClick={() => send({ kind: "skip" })}>Skip</PopButton>
+              <PopButton primary onClick={() => send({ kind: "completeCurrentTask" })}>Complete</PopButton>
             </>
           ) : (
             <PopButton primary disabled={!next} onClick={() => next && send({ kind: "switchTo", task: next.id })}>
