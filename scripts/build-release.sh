@@ -65,6 +65,7 @@ PKG_VERSION=$(python3 -c 'import json;print(json.load(open("package.json"))["ver
 CARGO_VERSION=$(sed -n '/^\[package\]/,/^\[/s/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
 NOTES="docs/release-notes/$VERSION.md"
 BUNDLE="src-tauri/target/universal-apple-darwin/release/bundle"
+APP="$BUNDLE/macos/TimeBox.app"
 DMG="$BUNDLE/dmg/TimeBox_${VERSION}_universal.dmg"
 TAG="v$VERSION"
 
@@ -125,15 +126,100 @@ fi
 
 [ -f "$DMG" ] || fail "expected $DMG, which the bundler did not produce"
 
-# ------------------------------------------------------------------ notarize
+# --------------------------------------------------------- staple the .app
+
+# Tauri notarizes the .app and staples it, then builds the DMG around the
+# result. The staple often fails there: `--wait` returns when Apple's *verdict*
+# is Accepted, but the ticket `stapler` fetches is published to Apple's
+# distribution servers a little later, and Tauri treats the failure as a
+# warning. What comes out is an app that is notarized but carries no proof of
+# it, sealed inside a DMG that was built a moment later.
+#
+# So: staple it here, retrying for as long as the delay usually lasts.
+if xcrun stapler validate "$APP" >/dev/null 2>&1; then
+  echo "  the .app is already stapled"
+else
+  step "stapling the .app (Tauri's staple did not take)"
+  stapled=0
+  for attempt in 1 2 3 4 5; do
+    if xcrun stapler staple "$APP"; then stapled=1; break; fi
+    echo "  attempt $attempt: the ticket is not published yet — retrying in 30s"
+    sleep 30
+  done
+  [ "$stapled" = 1 ] || fail "the app could not be stapled after five attempts.
+If it was never notarized, the §3 credentials were missing from the shell that
+ran the build — Tauri warns and carries on without them. Check with:
+  spctl -a -vvv -t install \"$APP\""
+fi
+
+# Whether the DMG has to be rebuilt is decided by the copy *inside* it, never
+# by the loose bundle: stapling the one on disk does not reach the one already
+# sealed in the container, and after a hand-run `stapler staple` the two
+# disagree. Mount it and ask.
+MNT="$BUNDLE/dmg/mnt-repack"
+rm -rf "$MNT" && mkdir -p "$MNT"
+hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT" -quiet
+if xcrun stapler validate "$MNT/TimeBox.app" >/dev/null 2>&1; then
+  REPACK=0
+  echo "  the app inside the DMG is stapled"
+else
+  REPACK=1
+  echo "  the app inside the DMG has no ticket — the DMG will be repacked"
+fi
+hdiutil detach "$MNT" -quiet
+rmdir "$MNT"
+
+if [ "$REPACK" = 1 ]; then
+  step "repacking the DMG around the stapled app"
+  # Cheaper and more faithful than rebuilding: the DMG's contents, layout,
+  # volume name and the /Applications symlink are all preserved, and the app
+  # inside is the same signed bundle — it only gains its ticket. Converting
+  # away from the compressed format is the only way to write into it.
+  RW="$BUNDLE/dmg/rw-repack.dmg"
+  cleanup() {
+    hdiutil detach "$MNT" -force >/dev/null 2>&1 || true
+    rm -rf "$RW" "$MNT"
+  }
+  trap cleanup EXIT
+
+  rm -rf "$RW" "$MNT" && mkdir -p "$MNT"
+  hdiutil convert "$DMG" -format UDRW -o "$RW" -quiet
+  hdiutil attach "$RW" -nobrowse -mountpoint "$MNT" -quiet
+  xcrun stapler staple "$MNT/TimeBox.app"
+  hdiutil detach "$MNT" -quiet
+  hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o "$DMG" -ov -quiet
+
+  cleanup
+  trap - EXIT
+
+  # The container was rewritten, so whatever ticket and signature it held are
+  # void. Both are restored below, in that order.
+  RENOTARIZE=1
+fi
+
+# ----------------------------------------------------- sign + notarize DMG
+
+# Tauri signs the DMG it builds. `hdiutil convert` writes a new file and does
+# not carry that signature over, so a repacked container has none — Gatekeeper
+# then rejects it with `source=no usable signature`, whatever its ticket says.
+if ! codesign -dv "$DMG" >/dev/null 2>&1; then
+  step "signing the DMG"
+  codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$DMG"
+  # A signature rewrites the file, so any ticket it held describes content that
+  # no longer exists. Notarization has to happen after this, never before.
+  RENOTARIZE=1
+fi
 
 # Tauri submits the .app and staples it, then builds the DMG around the result
 # — so the container itself is unnotarized and Gatekeeper judges the file the
 # user actually downloads (RELEASE.md §3, observed on the first 0.1.0 build).
-# Stapling attaches a ticket to the existing file, so this is safe to re-run
-# and skipped outright when the ticket is already there (--skip-build reruns).
-if xcrun stapler validate "$DMG" >/dev/null 2>&1; then
-  step "DMG already stapled — skipping notarization"
+# Stapling attaches a ticket to the existing file, so this is safe to re-run.
+# The skip needs both halves: a ticket alone is not a verdict Gatekeeper will
+# give, and a DMG can be stapled and unsigned at once.
+if [ "${RENOTARIZE:-0}" = 0 ] \
+   && xcrun stapler validate "$DMG" >/dev/null 2>&1 \
+   && spctl -a -t open --context context:primary-signature "$DMG" >/dev/null 2>&1; then
+  step "DMG already signed, notarized and stapled — skipping"
 else
   step "notarizing the DMG"
   xcrun notarytool submit "$DMG" \

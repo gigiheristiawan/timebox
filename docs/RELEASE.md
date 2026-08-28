@@ -18,8 +18,11 @@ Pages) is done and marked as such where it appears.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
-| 2026-08-28 19:15 | 0.3.2 bumped: the five files of §0 plus `CFBundleVersion` 5 → **6**. Notes in `docs/release-notes/0.3.2.md`. Two fixes — cross-day worked time (issue #11, **migration 004**) and `+5 min` during a break (issue #10). First release built with `scripts/build-release.sh`. |
-| 2026-08-28 18:20 | **`scripts/build-release.sh` added** — §3–§6 in one run: preflight, the universal signed build, the DMG notarization Tauri skips, the staple, `verify-release.sh` as a gate, and the draft release. The counterpart to `build-mas.sh`. The §0 version bump and the notes stay manual — they are judgement, not mechanism — but the script refuses to run without them, and refuses a dirty tree or an existing tag, the two ways a release ends up tagging a commit that claims the wrong version. Key ID and Issuer ID come from `~/.secrets/timebox-release.env`, still out of the repo. |
+| 2026-08-28 16:55 | **A repacked DMG loses its signature.** Tauri signs the DMG it builds; `hdiutil convert` writes a new file and carries nothing over, so the repacked container was stapled, notarized — and rejected by Gatekeeper with `source=no usable signature`. `build-release.sh` now re-signs the DMG after a repack and notarizes *after* that, since signing rewrites the file and voids any ticket. The "already stapled, skip" shortcut now also requires `spctl` to accept: a ticket alone is not a verdict, and a DMG can be stapled and unsigned at the same time. |
+| 2026-08-28 16:30 | **Tauri's staple of the `.app` can silently miss, and the DMG is then built around the unstapled copy** — seen on the 0.3.2 build: `spctl` said *Notarized Developer ID*, `stapler validate` said no ticket, and stapling by hand minutes later worked. `--wait` returns on Apple's **verdict**; the ticket `stapler` fetches is published a little after that, and Tauri only warns when it misses the window. `build-release.sh` now staples the app with retries, decides from the copy *inside* the DMG whether the container is stale, and repacks it (`hdiutil convert` → mount → staple → convert back) instead of rebuilding — the re-notarization of the rewritten container follows on its own. `verify-release.sh` gains an eighth check for the app inside the DMG: the other seven all passed while it carried no ticket. |
+| 2026-08-28 15:28 | **`build-mas.sh` gains `--validate`, `--upload` and `--skip-build`** — the two `altool` commands that always followed it by hand, with the API key read from `~/.secrets/timebox-release.env` and located through `API_PRIVATE_KEYS_DIR`. Validation is a hard gate before upload, since §7.3's failures are otherwise reported by email long after **UPLOAD SUCCEEDED**. §7 updated. |
+| 2026-08-28 15:26 | 0.3.2 bumped: the five files of §0 plus `CFBundleVersion` 5 → **6**. Notes in `docs/release-notes/0.3.2.md`. Two fixes — cross-day worked time (issue #11, **migration 004**) and `+5 min` during a break (issue #10). First release built with `scripts/build-release.sh`. |
+| 2026-08-28 15:22 | **`scripts/build-release.sh` added** — §3–§6 in one run: preflight, the universal signed build, the DMG notarization Tauri skips, the staple, `verify-release.sh` as a gate, and the draft release. The counterpart to `build-mas.sh`. The §0 version bump and the notes stay manual — they are judgement, not mechanism — but the script refuses to run without them, and refuses a dirty tree or an existing tag, the two ways a release ends up tagging a commit that claims the wrong version. Key ID and Issuer ID come from `~/.secrets/timebox-release.env`, still out of the repo. |
 | 2026-08-27 10:15 | 0.3.1 bumped: the five files of §0 plus `CFBundleVersion` 4 → **5**. Notes in `docs/release-notes/0.3.1.md`. A one-fix release — the popover's `Complete` button (issue #7). No migration. |
 | 2026-08-26 13:05 | 0.3.0 bumped: the five files of §0 plus `CFBundleVersion` 3 → **4**. Notes in `docs/release-notes/0.3.0.md`. No migration in this release. |
 | 2026-08-24 20:15 | **§0 added — the version bump**, which was the one release step this runbook never wrote down: five files, and `CFBundleVersion` moves independently of the marketing version. Settings now shows the version, inlined from `tauri.conf.json` at build time, so it needs no separate edit. §6 made version-agnostic (`VERSION=` rather than a literal `0.1.0`), and its Pages block marked one-time-and-done. Recorded the 0.2.0 run: building in a shell without the §3 exports produced an **ad-hoc, linker-signed** app — `flags=0x20002(adhoc,linker-signed)`, `TeamIdentifier=not set` — which is the app-level failure shape §3 already names. |
@@ -414,9 +417,10 @@ credentials gives the per-file reason.
 ./scripts/verify-release.sh
 ```
 
-Seven checks — universal binary, signature validity, Developer ID authority,
-hardened runtime, Team ID, Gatekeeper, and stapling **on both the app and the
-DMG**. All of them run even when one fails, so one pass reports everything, and
+Eight checks — universal binary, signature validity, Developer ID authority,
+hardened runtime, Team ID, Gatekeeper, stapling **on both the app and the DMG**,
+and stapling on the app **inside** the DMG, which is the copy that ends up in
+`/Applications` and the one the other seven cannot see. All of them run even when one fails, so one pass reports everything, and
 the exit status is 0 only if every check passed. The version is read from
 `tauri.conf.json`, so it does not go stale.
 
@@ -583,8 +587,22 @@ and an existing DMG user's data is invisible to it. That is accepted for now
 (0.1.0, few users) and must be said in the store description.
 
 ```bash
-./scripts/build-mas.sh
+./scripts/build-mas.sh                          # build the .pkg
+./scripts/build-mas.sh --validate               # and check it against App Store Connect
+./scripts/build-mas.sh --validate --upload      # and deliver it for TestFlight
+./scripts/build-mas.sh --upload --skip-build    # upload the .pkg already in target-mas/
 ```
+
+`--validate` is the cheap half of an upload: App Store Connect runs the same
+entitlement, icon and version checks and answers in seconds, where the same
+failure after an upload arrives by email twenty minutes later (§7.3). Run it
+first; `--upload` refuses nothing on its own, it only says so. Neither submits
+the build for review — that is still a decision made in the web UI.
+
+Both read the API key from `~/.secrets/timebox-release.env`, the same file
+`build-release.sh` uses, and point `altool` at the `.p8` with
+`API_PRIVATE_KEYS_DIR` rather than keeping a second copy of the key in one of
+the directories `altool` searches by default.
 
 Everything below is what that script does and why, plus the one-time account
 setup it cannot do for you.

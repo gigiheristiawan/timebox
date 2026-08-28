@@ -98,6 +98,18 @@ check "Ticket stapled to the DMG"     xcrun stapler validate "$DMG"
 check "Gatekeeper accepts the DMG" \
   spctl -a -vvv -t open --context context:primary-signature "$DMG"
 
+# 7. The app *inside* the DMG, which is the one that ends up in /Applications.
+#    Checks 5 and 6 both pass while it carries no ticket: Tauri builds the
+#    container around whatever the app was at that moment, and its staple can
+#    fail silently (RELEASE.md §3). Only mounting the image can tell.
+check "Ticket stapled to the app inside the DMG" \
+  bash -c '
+    mnt=$(mktemp -d)
+    hdiutil attach "$0" -nobrowse -readonly -mountpoint "$mnt" -quiet || exit 1
+    xcrun stapler validate "$mnt/TimeBox.app"; ok=$?
+    hdiutil detach "$mnt" -quiet; rmdir "$mnt" 2>/dev/null
+    exit $ok' "$DMG"
+
 # Summary
 printf '%s\n' "${bold}────────────────────────────────────────${off}"
 if [ ${#failures[@]} -eq 0 ]; then
@@ -118,8 +130,17 @@ else
   echo
   echo "${bold}Do not attach this DMG to a release.${off}"
   echo
-  # Two very different failures share this exit path, so name which one it is.
-  if ! printf '%s\n' "${failures[@]}" | grep -qv "DMG"; then
+  # Several very different failures share this exit path, so name which one.
+  if [ ${#failures[@]} = 1 ] && [ "${failures[0]}" = "Ticket stapled to the app inside the DMG" ]; then
+    echo "Only the app inside the DMG failed: it was sealed into the container"
+    echo "before its ticket existed. Apple publishes the ticket a little after"
+    echo "the verdict \`--wait\` returns, and Tauri only warns when its staple"
+    echo "misses that window (RELEASE.md §3)."
+    echo
+    echo "No rebuild and no new notarization are needed — the app is notarized"
+    echo "already. ./scripts/build-release.sh staples it and repacks the DMG"
+    echo "around it, then re-notarizes the container, which the rewrite voids."
+  elif ! printf '%s\n' "${failures[@]}" | grep -qv "DMG"; then
     echo "Only the DMG failed — TimeBox.app is notarized and stapled, so the"
     echo "build environment was correct. Tauri notarizes the .app and then"
     echo "builds the DMG around it; it never submits the DMG itself. Notarize"
