@@ -70,6 +70,15 @@ pub fn save(conn: &mut Connection, state: &MachineState, now: Millis) -> rusqlit
         )?;
     }
 
+    // Closed first, for the same reason as idle_spans above.
+    for sp in state.work_spans.iter().chain(state.open_work.iter()) {
+        tx.execute(
+            "INSERT INTO work_spans (id, block_id, started_at, ended_at) VALUES (?1,?2,?3,?4)
+             ON CONFLICT(id) DO UPDATE SET ended_at=excluded.ended_at",
+            params![sp.id, sp.block_id, sp.started_at, sp.ended_at],
+        )?;
+    }
+
     tx.execute(
         "UPDATE app_state SET timer_state=?1, current_block_id=?2, updated_at=?3 WHERE id=1",
         params![state.timer_state.as_str(), state.current_block_id, now],
@@ -176,6 +185,31 @@ pub fn load(conn: &Connection) -> rusqlite::Result<MachineState> {
         }
     }
 
+    let mut work_spans = Vec::new();
+    let mut open_work = None;
+    {
+        let mut stmt = conn.prepare(
+            "SELECT id, block_id, started_at, ended_at FROM work_spans ORDER BY started_at",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(WorkSpan {
+                id: r.get(0)?,
+                block_id: r.get(1)?,
+                started_at: r.get(2)?,
+                ended_at: r.get(3)?,
+            })
+        })?;
+        for sp in rows {
+            let sp = sp?;
+            // An open span is left open: hydrate feeds a Tick, and the block
+            // either resumes running through it or is parked, which closes it.
+            match sp.ended_at {
+                Some(_) => work_spans.push(sp),
+                None => open_work = Some(sp),
+            }
+        }
+    }
+
     let (timer_state, current_block_id): (String, Option<String>) = conn
         .query_row(
             "SELECT timer_state, current_block_id FROM app_state WHERE id = 1",
@@ -193,5 +227,7 @@ pub fn load(conn: &Connection) -> rusqlite::Result<MachineState> {
         current_block_id,
         idle_spans,
         open_idle,
+        work_spans,
+        open_work,
     })
 }

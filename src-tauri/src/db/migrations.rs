@@ -25,6 +25,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "working_window",
         sql: include_str!("migrations/003_working_window.sql"),
     },
+    Migration {
+        version: 4,
+        name: "work_spans",
+        sql: include_str!("migrations/004_work_spans.sql"),
+    },
 ];
 
 pub fn run(conn: &mut Connection) -> crate::error::AppResult<()> {
@@ -143,7 +148,7 @@ mod tests {
     fn schema_has_the_four_expected_tables() {
         let mut conn = Connection::open_in_memory().unwrap();
         run(&mut conn).unwrap();
-        for t in ["tasks", "time_blocks", "app_state", "settings", "idle_spans"] {
+        for t in ["tasks", "time_blocks", "app_state", "settings", "idle_spans", "work_spans"] {
             let n: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",

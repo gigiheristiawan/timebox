@@ -26,6 +26,15 @@ pub struct MachineState {
     /// `current_block_id` and the schema's partial unique index.
     #[serde(skip)]
     pub open_idle: Option<IdleSpan>,
+
+    /// Closed running intervals, per block (issue #11). Skipped for the same
+    /// reason `idle_spans` is: the UI reads the summary, never the spans.
+    #[serde(skip)]
+    pub work_spans: Vec<WorkSpan>,
+    /// The interval the current block is running through. `Some` exactly when
+    /// the timer is RUNNING — the complement of `open_idle`.
+    #[serde(skip)]
+    pub open_work: Option<WorkSpan>,
 }
 
 impl Default for MachineState {
@@ -38,6 +47,8 @@ impl Default for MachineState {
             current_block_id: None,
             idle_spans: Vec::new(),
             open_idle: None,
+            work_spans: Vec::new(),
+            open_work: None,
         }
     }
 }
@@ -410,6 +421,7 @@ pub fn reduce(
     }
 
     sync_idle(&mut state, before, now, ids);
+    sync_work(&mut state, now, ids);
 
     fx.push(Effect::UpdateMenuBar);
     fx.push(Effect::Persist);
@@ -456,6 +468,44 @@ fn sync_idle(state: &mut MachineState, before: TimerState, now: Millis, ids: &mu
             started_at: now,
             ended_at: None,
             reason,
+        });
+    }
+}
+
+/// Bracket every interval a block spends RUNNING (issue #11).
+///
+/// The mirror of `sync_idle`, and called from the same place for the same
+/// reason. It reconciles against the state rather than against the event: a
+/// switch leaves the timer RUNNING while changing which block runs, so a
+/// `before == after` test on `timer_state` alone would miss it. Reconciling
+/// also self-heals a state loaded from a database written before this table
+/// existed — the first tick after launch opens the missing span.
+fn sync_work(state: &mut MachineState, now: Millis, ids: &mut dyn IdSource) {
+    let after = match state.timer_state {
+        TimerState::Running => state.current_block_id.clone(),
+        _ => None,
+    };
+    let consistent = match (&after, &state.open_work) {
+        (None, None) => true,
+        (Some(id), Some(open)) => &open.block_id == id,
+        _ => false,
+    };
+    if consistent {
+        return;
+    }
+    if let Some(mut open) = state.open_work.take() {
+        // A zero-length span is banked as nothing rather than as a row.
+        if now > open.started_at {
+            open.ended_at = Some(now);
+            state.work_spans.push(open);
+        }
+    }
+    if let Some(block_id) = after {
+        state.open_work = Some(WorkSpan {
+            id: ids.next_id(),
+            block_id,
+            started_at: now,
+            ended_at: None,
         });
     }
 }

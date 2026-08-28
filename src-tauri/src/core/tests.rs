@@ -739,7 +739,7 @@ mod idle {
     }
 
     fn sum_at(s: &MachineState, now: Millis, window: Option<(Millis, Millis)>) -> Summary {
-        summarize(s, DAY, now, AVAILABLE, window)
+        summarize(s, DAY, DAY + 24 * HOUR, now, AVAILABLE, window)
     }
 
     fn today(s: &MachineState, now: Millis) -> crate::core::summary::Today {
@@ -989,7 +989,7 @@ mod summary {
     /// A working day with an ordinary 09:00-18:00 window. These tests predate
     /// the window and are about the other numbers; `idle` has its own module.
     fn sum(s: &MachineState, day: Millis, now: Millis, available: Millis) -> crate::core::summary::Summary {
-        summarize(s, day, now, available, Some((day + 9 * HOUR, day + 18 * HOUR)))
+        summarize(s, day, day + 24 * HOUR, now, available, Some((day + 9 * HOUR, day + 18 * HOUR)))
     }
 
     #[test]
@@ -1076,5 +1076,119 @@ mod summary {
         assert_eq!(top[0].ms, 30 * MIN); // A
         assert_eq!(top[1].ms, 10 * MIN); // B
         assert!(top[0].ms >= top[1].ms && top[1].ms >= top[2].ms);
+    }
+}
+
+mod cross_day {
+    //! Tests 48–51 (issue #11). A block is not an interval: it can be parked
+    //! overnight and extended for days, so attributing it whole to the day it
+    //! started reported nothing at all for the task a day was spent on.
+
+    use super::*;
+    use crate::core::summary::{summarize, Today};
+
+    const HOUR: Millis = 60 * MIN;
+    const DAY_MS: Millis = 24 * HOUR;
+    const AVAILABLE: Millis = 420 * MIN;
+
+    /// `h:m` on the day that begins at `day` (day 0 is the first day).
+    fn at(day: i64, h: i64, m: i64) -> Millis {
+        day * DAY_MS + h * HOUR + m * MIN
+    }
+
+    fn today(s: &MachineState, day: i64, now: Millis) -> Today {
+        let start = day * DAY_MS;
+        summarize(s, start, start + DAY_MS, now, AVAILABLE, Some((start + 9 * HOUR, start + 18 * HOUR))).today
+    }
+
+    #[test]
+    fn t48_a_block_worked_across_midnight_is_split_between_the_two_days() {
+        // 23:40 to 00:10 on a 30 m block. Before work spans existed the whole
+        // 30 m landed on the first day and the second reported zero worked —
+        // for the task it was in fact running.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(0, 23, 40), &mut ids);
+        let s = fire(s, Event::Tick, at(1, 0, 10), &mut ids);
+
+        let first = today(&s, 0, at(1, 0, 10));
+        let second = today(&s, 1, at(1, 0, 10));
+        assert_eq!(first.worked_ms, 20 * MIN, "23:40–00:00 belongs to the first day");
+        assert_eq!(second.worked_ms, 10 * MIN, "00:00–00:10 belongs to the second");
+        assert_eq!(
+            first.worked_ms + second.worked_ms,
+            30 * MIN,
+            "and the two days together are the block, neither losing nor duplicating it"
+        );
+        assert_eq!(second.top.first().map(|t| t.ms), Some(10 * MIN), "attributed to the task, too");
+    }
+
+    #[test]
+    fn t49_time_parked_over_midnight_is_worked_on_neither_day() {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(0, 23, 50), &mut ids);
+        let s = fire(s, Event::Pause, at(0, 23, 55), &mut ids);
+        let s = fire(s, Event::Resume, at(1, 0, 5), &mut ids);
+
+        assert_eq!(today(&s, 0, at(1, 0, 10)).worked_ms, 5 * MIN);
+        assert_eq!(today(&s, 1, at(1, 0, 10)).worked_ms, 5 * MIN);
+    }
+
+    #[test]
+    fn t50_a_block_completed_after_midnight_counts_to_the_day_it_finished() {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(0, 23, 40), &mut ids);
+        let s = fire(s, Event::Tick, at(1, 0, 10), &mut ids);
+        let s = fire(s, Event::DecideComplete, at(1, 0, 12), &mut ids);
+
+        assert_eq!(today(&s, 0, at(1, 0, 20)).blocks_completed, 0);
+        assert_eq!(today(&s, 1, at(1, 0, 20)).blocks_completed, 1, "counted once, on the finishing day");
+    }
+
+    #[test]
+    fn t52_a_running_block_loaded_without_a_span_opens_one_on_the_first_tick() {
+        // Migration 004 lands on a database whose block may be mid-flight. The
+        // reducer reconciles spans against the state rather than against the
+        // event, so hydrate's single Tick is enough to start recording again.
+        let (s, mut ids) = day();
+        let mut s = fire(s, Event::SwitchTo { task: "A".into() }, at(0, 10, 0), &mut ids);
+        s.open_work = None;
+        s.work_spans.clear();
+
+        let s = fire(s, Event::Tick, at(0, 10, 5), &mut ids);
+        assert!(s.open_work.is_some(), "the span reopens rather than staying lost");
+        assert_eq!(
+            today(&s, 0, at(0, 10, 20)).worked_ms,
+            15 * MIN,
+            "and records from the tick on; the lost interval is not invented back"
+        );
+    }
+
+    #[test]
+    fn t51_a_block_written_before_work_spans_keeps_its_old_attribution() {
+        // Migration 004 cannot recover the shape of a block already in the
+        // database, so those keep counting to the day they started — past days
+        // read as they always did rather than dropping to zero.
+        let (mut s, _ids) = day();
+        s.blocks.push(TimeBlock {
+            id: "legacy".into(),
+            kind: BlockKind::Work,
+            task_id: Some("A".into()),
+            planned_ms: 2 * HOUR,
+            extension_ms: 0,
+            interruptions: 0,
+            actual_ms: Some(2 * HOUR),
+            status: BlockStatus::Completed,
+            started_at: Some(at(0, 22, 0)),
+            ended_at: Some(at(1, 0, 30)),
+            end_at: Some(at(1, 0, 30)),
+            paused_at: None,
+            remaining_when_paused_ms: None,
+            accumulated_active_ms: 2 * HOUR,
+            last_resume_at: None,
+            away_ms: 0,
+        });
+
+        assert_eq!(today(&s, 0, at(1, 1, 0)).worked_ms, 2 * HOUR);
+        assert_eq!(today(&s, 1, at(1, 1, 0)).worked_ms, 0);
     }
 }

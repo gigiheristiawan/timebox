@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Date (WIB)       | Change                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-08-28 15:10 | **Worked time is now measured per interval, not per block (issue #11).** A block started 23:32 and extended into the next afternoon counted its whole active time to the day it *started* — `core/summary.rs` bucketed by `started_at` — so the day actually spent on it read `Worked 0m`. Migration **004** adds `work_spans(block_id, started_at, ended_at)`, the mirror of `idle_spans`, written by `timer_machine::sync_work`; `core::summary` measures a day as `spans ∩ day` and now takes `day_end` (`state::day_end_ms`, the next *local* midnight) beside `day_start`. Blocks predating the migration keep the old attribution. `docs/features/IDLE_TIME.md` §5.1b, §8 (first limit struck), tests 48–52. |
 | 2026-08-27 09:40 | The popover's current-task row now offers **Complete** next to Pause and Skip (`components/Popover.tsx`), sending the same `completeCurrentTask` action as the main window (issue #7). No backend change — `Event::CompleteCurrentTask` already handled it. `docs/SPEC.md` §7.2 updated. |
 | 2026-08-26 12:40 | Rules 18 and 19 moved out of this file into `skills/create_git_commit.md`, where the rest of the git rules already live. Rule 15 points at it. |
 | 2026-08-26 12:20 | **Rule 19 added** — the `claude.ai/code/session_…` link never leaves the terminal. It went into both commits on PR #5 and the PR body, where it reads as Gigih's link on Gigih's repo and is permanent. `Co-Authored-By` is the whole of the attribution. |
@@ -239,12 +240,13 @@ This is the single most important structural rule (`docs/SPEC.md` R6/R7).
 
 ```
 core/           pure reducer + queue ops + model + menubar/summary  (no I/O)
-                summary.rs also owns the interval algebra idle is defined on
+                summary.rs also owns the interval algebra idle and worked are
+                both defined on
 db/             rusqlite; repo.rs snapshots whole state in one transaction;
                 settings.rs reads/writes the single settings row
 state.rs        App: hydrate, dispatch, the tick thread, cached settings;
-                day_start_ms and window_for — the two calendar answers the
-                core is handed rather than allowed to compute
+                day_start_ms, day_end_ms and window_for — the calendar answers
+                the core is handed rather than allowed to compute
 platform/       checkpoint, popover, tray windows;
                 login_item (SMAppService) and window_corners (rounded popover),
                 both raw AppKit via objc2 — see the App Store note below
@@ -284,6 +286,12 @@ Each is enforced and tested; changing one changes what the product is.
 - **At most one parked block per task**, enforced both in the reducer and by a partial unique index in the schema.
 - **The checkpoint has no exit.** No dismiss/close/later/continue, no timeout, `Esc` inert, `Cmd+W` refused, and `SwitchTo`/`Pause`/`Resume`/`StartBreak` are no-ops while a work checkpoint is open.
 - **`end_at` is absolute and never decremented** *while a block runs*. It is recomputed on every resume, and **quitting parks the block** — the exit path dispatches `Event::Pause`, so the interval the app is closed is idle, not work (IDLE_TIME D16, reversing SPEC §6). The anti-gaming rule is untouched: parking holds the *remainder* and never re-grants an allocation. Recorded work is still capped at the block's allocation, which is what bounds the one gap left — a crash or a sleep mid-block, until D21 lands.
+- **A day's worked time is `work_spans ∩ day`, not a block's total.** A block
+  is not an interval: it can be parked overnight and extended for days, so
+  `started_at`-bucketing reported nothing for the day actually spent on it
+  (issue #11). Spans are banked on the transition, like `idle_spans`, and the
+  two partition the timeline. Blocks with no spans — written before migration
+  004 — keep the old whole-block attribution rather than reading zero.
 - **Idle is inferred, work is observed.** `idle_ms` is *working-window time no running block covered* — a set difference over intervals, never `window − worked − break`, which goes negative when a block spans `work_end`. Outside the window, work is recorded (`outside_hours_ms`) and idle is not: no claim of presence was made there. A day with no blocks reports no idle at all (D19), which is the holiday and sick-day answer.
 - **An open idle span survives a quit and keeps accruing.** Paused is still paused whether or not the app is alive (D15). This is why `repo::load` returns the open span open, and why D20's "close it at the last state write" was revised away — see `docs/features/IDLE_TIME.md`.
 - **A deliberate break parks the work block and leaves the task at the queue head.** Unlike a switch, which rotates to the tail, and unlike a switch it counts no `interruptions` — D11 measures churn between tasks (D22).
@@ -336,7 +344,7 @@ socket is sandbox-illegal; `RunEvent::Reopen` in `lib.rs` covers the same
 
 ## Gotchas
 
-- Migrations store **milliseconds**, matching the core exactly; second-granularity would accumulate rounding into real drift. `001` was rewritten in place pre-release; `002` (`away_ms`, `first_run_done`) and `003` (the working window and `idle_spans`) followed the forward-only rule. From here, add a `004`.
+- Migrations store **milliseconds**, matching the core exactly; second-granularity would accumulate rounding into real drift. `001` was rewritten in place pre-release; `002` (`away_ms`, `first_run_done`), `003` (the working window and `idle_spans`) and `004` (`work_spans`) followed the forward-only rule. From here, add a `005`.
 - `available_work_minutes_per_day`, `work_start_minutes` and `work_end_minutes` are the columns in **minutes** — `db/settings.rs` converts at the boundary so the rest of the app stays in milliseconds. The two window columns are a wall-clock *time of day*, not a duration: `state::window_for` resolves them against a local date, so a DST day's window still starts at 09:00 by the clock on the wall.
 - **`Cmd+Q` does not emit `RunEvent::ExitRequested`.** It is muda's predefined Quit item, which sends `terminate:` straight to `NSApplication`; tao sees `applicationWillTerminate` and emits **`Exit` only**. Anything that must happen before the process dies — the D16 park in `lib.rs` is the one that matters — belongs on `RunEvent::Exit`, which every quit path reaches including `handle.exit(0)`. Hooked on `ExitRequested` it fails silently, and only from `Cmd+Q`: the popover's Quit item still worked, which is what made it look fine.
 - `idle_spans` has a partial unique index on the open row, so `repo::save` writes the closed spans **before** the open one — inserting a newly opened span before the previous one's `ended_at` lands would be rejected.
