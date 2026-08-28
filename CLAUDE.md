@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Date (WIB)       | Change                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-08-28 18:45 | **Rule 18 added** — an issue is worked on its own branch, `bugs/<n>-<slug>` or `feature/<n>-<slug>`, never on `main`, and the hand-over order is commit → Gigih pushes → PR with `Closes #<n>`. Written down after issues #10 and #11 each needed the branch name and the pause before pushing asked for by hand. |
+| 2026-08-28 18:20 | **`scripts/build-release.sh`** now runs the DMG/GitHub release end to end — preflight, universal signed build, the DMG notarization Tauri skips, staple, `verify-release.sh`, draft release — as `build-mas.sh` does for the App Store. The version bump and release notes stay manual; the script refuses to run without them. `docs/RELEASE.md` "The short path". |
 | 2026-08-28 17:05 | **`+5 min` during a break added nothing (issue #10).** `Event::ExtendBreak` in `core/timer_machine.rs` set `end_at = now + ms`, replacing the remainder rather than extending it — correct only at the break checkpoint, where none is left. It now pushes `end_at` forward while the break runs, adds to `remaining_when_paused_ms` while paused (staying paused, as `AddTime` does), and keeps `now + ms` at the checkpoint. `docs/SPEC.md` §7.2, `docs/features/IDLE_TIME.md` test 53. |
 | 2026-08-28 15:10 | **Worked time is now measured per interval, not per block (issue #11).** A block started 23:32 and extended into the next afternoon counted its whole active time to the day it *started* — `core/summary.rs` bucketed by `started_at` — so the day actually spent on it read `Worked 0m`. Migration **004** adds `work_spans(block_id, started_at, ended_at)`, the mirror of `idle_spans`, written by `timer_machine::sync_work`; `core::summary` measures a day as `spans ∩ day` and now takes `day_end` (`state::day_end_ms`, the next *local* midnight) beside `day_start`. Blocks predating the migration keep the old attribution. `docs/features/IDLE_TIME.md` §5.1b, §8 (first limit struck), tests 48–52. |
 | 2026-08-27 09:40 | The popover's current-task row now offers **Complete** next to Pause and Skip (`components/Popover.tsx`), sending the same `completeCurrentTask` action as the main window (issue #7). No backend change — `Event::CompleteCurrentTask` already handled it. `docs/SPEC.md` §7.2 updated. |
@@ -171,6 +173,27 @@ A long instruction block is unfollowable — the thread gets lost and none of it
 Do not pad a reply that contains steps with optional extras, "while you're there" asides, "worth knowing" caveats, or offers of further work. Those enlarge the pile even when they are not themselves steps. Hold them until asked.
 
 The same applies to scripts: one that prints a ten-point checklist has just moved the problem. Have him run one thing and report back.
+
+### Rule 18 - One branch per issue, and the branch names its kind
+
+Never work an issue on `main`. Before the first edit, cut a branch from it:
+
+| Issue | Branch |
+| ----- | ------ |
+| bug | `bugs/<number>-<short-slug>` |
+| feature or enhancement | `feature/<number>-<short-slug>` |
+
+Then the sequence is fixed, and each step waits for the one before it:
+
+1. implement on the branch, and commit (`skills/create_git_commit.md`)
+2. **stop** — hand Gigih the exact `git push -u origin <branch>` and wait
+3. when he says the branch is pushed, open the PR against `main` with `Closes #<number>` in the body
+
+Step 2 is not a formality: pushing and opening a PR act as Gigih under his
+credentials, and `skills/create_git_commit.md` requires his go-ahead for each
+such act separately. "Create the PR" authorises that PR and nothing after it.
+
+---
 
 ## Commands
 

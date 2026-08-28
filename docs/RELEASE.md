@@ -3,8 +3,8 @@
 How to produce a distributable TimeBox build. Phase 8 of
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Current state:** **0.1.0, 0.2.0 and 0.3.0 are published**, and **0.3.1 is in
-flight** — version bumped (build 5), notes written; the signed/notarized build
+**Current state:** **0.1.0 through 0.3.1 are published**, and **0.3.2 is in
+flight** — version bumped (build 6), notes written; the signed/notarized build
 has not been made yet.
 The 0.1.0 DMG is attached to the [v0.1.0
 release](https://github.com/gigiheristiawan/timebox/releases/tag/v0.1.0) and the
@@ -18,6 +18,8 @@ Pages) is done and marked as such where it appears.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-08-28 19:15 | 0.3.2 bumped: the five files of §0 plus `CFBundleVersion` 5 → **6**. Notes in `docs/release-notes/0.3.2.md`. Two fixes — cross-day worked time (issue #11, **migration 004**) and `+5 min` during a break (issue #10). First release built with `scripts/build-release.sh`. |
+| 2026-08-28 18:20 | **`scripts/build-release.sh` added** — §3–§6 in one run: preflight, the universal signed build, the DMG notarization Tauri skips, the staple, `verify-release.sh` as a gate, and the draft release. The counterpart to `build-mas.sh`. The §0 version bump and the notes stay manual — they are judgement, not mechanism — but the script refuses to run without them, and refuses a dirty tree or an existing tag, the two ways a release ends up tagging a commit that claims the wrong version. Key ID and Issuer ID come from `~/.secrets/timebox-release.env`, still out of the repo. |
 | 2026-08-27 10:15 | 0.3.1 bumped: the five files of §0 plus `CFBundleVersion` 4 → **5**. Notes in `docs/release-notes/0.3.1.md`. A one-fix release — the popover's `Complete` button (issue #7). No migration. |
 | 2026-08-26 13:05 | 0.3.0 bumped: the five files of §0 plus `CFBundleVersion` 3 → **4**. Notes in `docs/release-notes/0.3.0.md`. No migration in this release. |
 | 2026-08-24 20:15 | **§0 added — the version bump**, which was the one release step this runbook never wrote down: five files, and `CFBundleVersion` moves independently of the marketing version. Settings now shows the version, inlined from `tauri.conf.json` at build time, so it needs no separate edit. §6 made version-agnostic (`VERSION=` rather than a literal `0.1.0`), and its Pages block marked one-time-and-done. Recorded the 0.2.0 run: building in a shell without the §3 exports produced an **ad-hoc, linker-signed** app — `flags=0x20002(adhoc,linker-signed)`, `TeamIdentifier=not set` — which is the app-level failure shape §3 already names. |
@@ -42,6 +44,29 @@ Pages) is done and marked as such where it appears.
 | 2026-08-20 03:05 | Recorded the Team ID, how to read an identity off a certificate, and the "no identity found" failure mode. |
 | 2026-08-20 02:30 | Recorded the measured 0.1.0 baseline in §4.                                  |
 | 2026-08-20 02:10 | Initial version — icon regeneration, universal build, signing, notarization. |
+
+---
+
+## The short path
+
+Steps 1–2 below are judgement — the version bump and the release notes. Everything
+after them is mechanism, and `scripts/build-release.sh` runs it in one pass:
+
+```bash
+$EDITOR docs/release-notes/<version>.md   # §0, after bumping the five files
+git commit …                              # the tag points at HEAD
+./scripts/build-release.sh                # §3 build → notarize → §4 verify → §6 draft
+```
+
+It refuses to start without matching versions in the four files, without the
+notes file, on a dirty tree, or when the tag already exists. Credentials come
+from `~/.secrets/timebox-release.env` (`APPLE_API_KEY`, `APPLE_API_ISSUER`,
+optionally `APPLE_SIGNING_IDENTITY`), which is why the Key ID and Issuer ID stay
+out of this repo. `--skip-build` reuses the bundle on disk; `--no-release` stops
+after verification. Publishing the draft is still manual (§6).
+
+The sections below are what it does, and remain the reference when a step fails
+or has to be run by hand.
 
 ---
 
