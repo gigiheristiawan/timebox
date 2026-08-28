@@ -704,6 +704,46 @@ fn t45_start_break_during_a_break_is_a_no_op() {
 }
 
 #[test]
+fn t53_extending_a_running_break_adds_to_the_remainder() {
+    // Issue #10: +5 read as "make the break 5 minutes", cutting a 10-minute
+    // break short 4 minutes in. A grant adds; it never re-grants, which is the
+    // same rule the anti-gaming park obeys.
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::StartBreak { ms: 10 * MIN }, 0, &mut ids);
+    let s = fire(s, Event::ExtendBreak { ms: 5 * MIN }, 4 * MIN, &mut ids);
+
+    assert_eq!(s.remaining_ms(4 * MIN), 11 * MIN, "6 left plus the 5 granted");
+    assert_eq!(s.timer_state, TimerState::Running);
+    assert_eq!(s.current_block().unwrap().extension_ms, 5 * MIN);
+}
+
+#[test]
+fn t53b_extending_at_the_break_checkpoint_grants_the_whole_amount() {
+    // Nothing is left there, so adding to the remainder *is* `now + ms` — and
+    // the wait for the answer is not rest that was taken.
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::StartBreak { ms: 10 * MIN }, 0, &mut ids);
+    let s = fire(s, Event::Tick, 11 * MIN, &mut ids);
+    assert_eq!(s.timer_state, TimerState::AwaitingDecision);
+
+    let s = fire(s, Event::ExtendBreak { ms: 5 * MIN }, 12 * MIN, &mut ids);
+    assert_eq!(s.timer_state, TimerState::Running);
+    assert_eq!(s.remaining_ms(12 * MIN), 5 * MIN);
+}
+
+#[test]
+fn t53c_extending_a_paused_break_holds_the_grant_and_stays_paused() {
+    let (s, mut ids) = start_a(0);
+    let s = fire(s, Event::StartBreak { ms: 10 * MIN }, 0, &mut ids);
+    let s = fire(s, Event::Pause, 4 * MIN, &mut ids);
+    let s = fire(s, Event::ExtendBreak { ms: 5 * MIN }, 5 * MIN, &mut ids);
+
+    assert_eq!(s.timer_state, TimerState::Paused, "a grant is not a resume");
+    let b = s.current_block().unwrap();
+    assert_eq!(b.remaining_when_paused_ms, Some(11 * MIN));
+}
+
+#[test]
 fn a_deliberate_break_can_start_from_idle_and_from_paused() {
     let (s, mut ids) = day();
     let idle = fire(s.clone(), Event::StartBreak { ms: 10 * MIN }, 0, &mut ids);

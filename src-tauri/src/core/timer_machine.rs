@@ -298,15 +298,29 @@ pub fn reduce(
             if state.on_break() && ms > 0 {
                 settle_away(&mut state, now);
                 if let Some(id) = state.current_block_id.clone() {
+                    // A grant is added to what is left, never a fresh block of
+                    // `ms` (issue #10). Paused mid-break the remainder is the
+                    // held one and the break stays paused; running, `end_at`
+                    // is pushed forward so the time already rested stays
+                    // rested; and at the break checkpoint there is nothing
+                    // left, so `now + ms` is what adding gives.
+                    let paused = state.timer_state == TimerState::Paused;
                     if let Some(b) = state.block_mut(&id) {
                         b.extension_ms += ms;
-                        b.end_at = Some(now + ms);
-                        b.last_resume_at = Some(now);
-                        b.status = BlockStatus::Running;
+                        if paused {
+                            b.remaining_when_paused_ms =
+                                Some(b.remaining_when_paused_ms.unwrap_or(0) + ms);
+                        } else {
+                            b.end_at = Some(b.end_at.unwrap_or(now).max(now) + ms);
+                            b.last_resume_at = b.last_resume_at.or(Some(now));
+                            b.status = BlockStatus::Running;
+                        }
                     }
-                    state.timer_state = TimerState::Running;
-                    fx.push(Effect::LeaveCheckpoint);
-                    fx.push(Effect::StartTicking);
+                    if !paused {
+                        state.timer_state = TimerState::Running;
+                        fx.push(Effect::LeaveCheckpoint);
+                        fx.push(Effect::StartTicking);
+                    }
                 }
             }
         }
