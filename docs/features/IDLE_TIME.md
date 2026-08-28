@@ -13,6 +13,7 @@ D13 (time at an unanswered checkpoint).
 
 | Date (WIB)       | Change                                                                 |
 | ---------------- | ---------------------------------------------------------------------- |
+| 2026-08-28 15:10 | **Cross-day attribution is no longer a limit — §8's first bullet is struck (issue #11).** A block started 23:32 and extended into the next afternoon reported its whole 1h40 to the day it *started*, so the second day read `worked_ms` = 0 for the task actually being worked on. Migration **004** adds `work_spans(block_id, started_at, ended_at)`, the mirror of `idle_spans`: `timer_machine::sync_work` opens one whenever a block starts or resumes and closes it whenever it stops, so the two sets partition the timeline. `core::summary` now measures a day as `spans ∩ day` (per task, too) and takes a `day_end` argument beside `day_start` — `state::day_end_ms` resolves the next *local* midnight, so a DST day is 23 or 25 hours. Blocks written before the migration have no spans and keep the old `started_at` attribution, so past days read as they always did. `blocks_completed` now counts on the day a block **ended**, so one crossing midnight is not counted twice. Tests 48–52. |
 | 2026-08-24 19:10 | **The Idle line refreshes while the timer is stopped.** It was only ever repainted by the tick loop, which parks in the very states idle accrues in, so an open window showed a frozen figure until the next action. Fixed by emitting `timebox://changed` on window focus and polling every 10s while not `RUNNING`. Nothing moved into TypeScript — idle is a set difference over `idle_spans`, which the snapshot does not carry. |
 | 2026-08-24 18:10 | **The tray's break item follows the state.** It read *Take a break* during a break, where clicking it did nothing — the reducer refused it correctly and the menu said otherwise. It now reads *End break* during a break and is disabled at a work checkpoint. §6 amended. |
 | 2026-08-24 17:45 | **D16 fix — the park is hooked on `RunEvent::Exit`, not `ExitRequested`.** Found in manual testing: quitting from the popover parked correctly, but `Cmd+Q` left the block `RUNNING` and the clock ran across the quit. `Cmd+Q` is muda's predefined Quit item, which sends `terminate:` to `NSApplication`; tao emits `Exit` alone for that path and no `ExitRequested` at all. `Exit` is reached by every quit path, and `Event::Pause` is already a no-op unless the timer is running, so arriving there already parked costs nothing. Corrects plan task I3.2. |
@@ -164,6 +165,25 @@ CREATE UNIQUE INDEX idx_idle_spans_open ON idle_spans(ended_at) WHERE ended_at I
 `work_start >= work_end` is rejected at the settings boundary; overnight
 windows are **out of scope** (see §8).
 
+### 5.1b Migration `004_work_spans.sql` (issue #11)
+
+```sql
+CREATE TABLE work_spans (
+    id         TEXT    PRIMARY KEY,
+    block_id   TEXT    NOT NULL REFERENCES time_blocks(id) ON DELETE CASCADE,
+    started_at INTEGER NOT NULL,
+    ended_at   INTEGER              -- NULL = still running
+);
+CREATE UNIQUE INDEX idx_work_spans_open ON work_spans(ended_at) WHERE ended_at IS NULL;
+```
+
+The same argument as §5.2, applied to the other half of the timeline.
+`accumulated_active_ms` is a total with no shape, so it can only be attributed
+whole — and a block with extensions routinely outlives the day it started in.
+`sync_work` reconciles against the *state* rather than the event, because a
+switch leaves the timer RUNNING while changing which block is running; that
+also self-heals a database written before this table existed.
+
 ### 5.2 Why spans and not a counter
 
 Spans are banked on transition, not derived after the fact — the same reasoning
@@ -248,15 +268,21 @@ Continuing the numbering in `docs/SPEC.md` §12; Rust test names must match.
 | 45 | `StartBreak` during a running break is a no-op; `ExtendBreak` is the operation. |
 | 46 | A 45 m deliberate break inside the window contributes to `break_ms` and **zero** to `idle_ms` — the point of D22. |
 | 47 | A deliberate break does not consume `available_work_minutes_per_day` (D9 unchanged). |
+| 48 | A block worked 23:40–00:10 gives the first day 20m and the second 10m; the two together are the block, neither losing nor duplicating it. The second day's top list attributes its 10m to the task (issue #11). |
+| 49 | A block parked at 23:55 and resumed at 00:05 counts that interval as worked on neither day. |
+| 50 | A block completed at 00:12 counts in `blocks_completed` on the day it finished, and only there. |
+| 51 | A block written before migration 004 carries no spans and keeps its `started_at` attribution — a past day reads as it always did rather than dropping to zero. |
+| 52 | A running block loaded without an open span opens one on the first `Tick` (hydrate's), and records from that instant on; the lost interval is not invented back. |
 
 ---
 
 ## 8. Known limits, accepted
 
-- **Block-to-day attribution stays `started_at`-based**, as `core/summary.rs`
-  already does it. A block started 23:50 Friday and worked to 00:20 Saturday
-  counts entirely to Friday. Splitting blocks at midnight is not worth the
-  complexity; it is named here so it is not later mistaken for a bug.
+- ~~**Block-to-day attribution stays `started_at`-based.**~~ **Struck
+  2026-08-28 (issue #11).** It *was* mistaken for a bug, correctly: with
+  extensions a block routinely lives for a day or more, and the day it was
+  worked reported zero. `work_spans` now splits it at the boundary; only blocks
+  predating migration 004 still attribute whole.
 - **Overnight windows (e.g. 22:00–06:00) are unsupported.** Night shifts would
   require the window to span two calendar days and the day boundary to move
   with it — a different feature. The settings validation rejects it rather than

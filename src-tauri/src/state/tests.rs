@@ -247,6 +247,30 @@ fn the_open_span_index_holds_through_repeated_saves() {
 }
 
 #[test]
+fn work_spans_survive_a_restart_and_keep_at_most_one_open() {
+    // Issue #11. The spans are what a day's worked time is now measured from,
+    // so losing them across a quit would lose the day.
+    let db = Db::in_memory().unwrap();
+    let app = App::hydrate(db, 0).unwrap();
+    { *app.machine.lock() = seeded(); }
+    app.dispatch(Event::SwitchTo { task: "A".into() }, 0).unwrap();
+    for i in 1..=6 {
+        app.dispatch(Event::Pause, i * MIN).unwrap();
+        app.dispatch(Event::Resume, i * MIN + 30_000).unwrap();
+    }
+    let open: i64 = app
+        .db
+        .with(|c| c.query_row("SELECT COUNT(*) FROM work_spans WHERE ended_at IS NULL", [], |r| r.get(0)))
+        .unwrap();
+    assert_eq!(open, 1, "exactly the block that is running");
+
+    let before = app.machine.lock().clone();
+    let reloaded = app.db.with(crate::db::repo::load).unwrap();
+    assert_eq!(reloaded.work_spans, before.work_spans);
+    assert_eq!(reloaded.open_work, before.open_work);
+}
+
+#[test]
 fn the_window_is_empty_on_a_day_the_user_does_not_work() {
     // D18. Resolving the weekday needs a timezone, which is why this lives in
     // the shell and `core::summary` takes the answer as an argument.

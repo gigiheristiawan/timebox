@@ -104,6 +104,24 @@ pub struct IdleSpan {
     pub reason: IdleReason,
 }
 
+/// One interval during which a *block* was RUNNING (issue #11).
+///
+/// The mirror image of `IdleSpan`, and written on the same transitions: a span
+/// opens whenever a block starts or resumes and closes whenever it stops, so
+/// the two sets partition the timeline exactly. It exists because a block's
+/// `accumulated_active_ms` is a single total with no shape — a block started
+/// before midnight and worked after it could only be attributed whole, which
+/// made a day's `worked_ms` read 0 for the task actually being worked on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSpan {
+    pub id: String,
+    pub block_id: BlockId,
+    pub started_at: Millis,
+    /// `None` while the block is still running.
+    pub ended_at: Option<Millis>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BlockKind {
     Work,

@@ -36,6 +36,13 @@ pub fn day_start_ms(now: Millis) -> Millis {
         .unwrap_or(now - now.rem_euclid(86_400_000))
 }
 
+/// The instant the day beginning at `day_start` ends — the next local
+/// midnight. Not `day_start + 24h`: a DST day is 23 or 25 hours long, and the
+/// day boundary is a wall-clock fact, like the working window below.
+pub fn day_end_ms(day_start: Millis) -> Millis {
+    day_start_ms(day_start + 36 * 3_600_000)
+}
+
 /// The working window on the day beginning at `day_start`, as a pair of
 /// absolute instants — or `None` when that weekday is not a working day, which
 /// is the whole of IDLE_TIME D18: a weekend is a day whose window is empty.

@@ -50,6 +50,7 @@ fn snapshot_of(app: &App) -> Snapshot {
         summary: summarize(
             &state,
             day_start,
+            crate::state::day_end_ms(day_start),
             now,
             settings.available_work_ms_per_day,
             window_for(day_start, &settings),

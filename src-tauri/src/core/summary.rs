@@ -7,6 +7,7 @@
 
 use super::model::*;
 use super::timer_machine::MachineState;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,8 +73,29 @@ const TOP_N: usize = 3;
 /// Time a block has consumed so far: its final figure once ended, otherwise the
 /// live one. Both are already capped at the allocation by the reducer, so a
 /// block reopened days later cannot report days of work (SPEC §6).
+///
+/// This is the block's whole life, not one day of it — only the fallback in
+/// `spent_in_day` still reads it.
 fn spent_ms(b: &TimeBlock, now: Millis) -> Millis {
     b.actual_ms.unwrap_or_else(|| b.active_ms(now).min(b.alloc_ms()))
+}
+
+/// The part of a block's running time that falls inside `day` (issue #11).
+///
+/// A block is not an interval: it can be parked at 23:50 and resumed at 09:00,
+/// and an extension can keep it alive for days. Attributing it whole to the day
+/// it *started* — which is what this did before — reported nothing at all for
+/// the task a whole day had actually been spent on.
+///
+/// Blocks written before `work_spans` existed carry no spans, and there is no
+/// way to recover their shape after the fact; those keep the old attribution so
+/// that past days read as they always did rather than dropping to zero.
+fn spent_in_day(spans: &SpansByBlock, b: &TimeBlock, day: Iv, now: Millis) -> Millis {
+    match spans.get(&b.id) {
+        Some(ivs) => total(&intersect(ivs, &[day])).min(b.alloc_ms()),
+        None if b.started_at.is_some_and(|t| t >= day.0) => spent_ms(b, now),
+        None => 0,
+    }
 }
 
 /// Total time this block has spent waiting for a decision: what has been banked
@@ -198,14 +220,38 @@ fn idle_intervals(state: &MachineState, now: Millis) -> [(IdleReason, Vec<Iv>); 
     by_reason
 }
 
+/// Every block's running intervals, clipped at `now`. The open span is folded
+/// in so a block still running reports the time it has spent so far.
+type SpansByBlock = HashMap<BlockId, Vec<Iv>>;
+
+fn spans_by_block(state: &MachineState, now: Millis) -> SpansByBlock {
+    let mut out: SpansByBlock = HashMap::new();
+    for sp in state.work_spans.iter().chain(state.open_work.iter()) {
+        let iv = (sp.started_at, sp.ended_at.unwrap_or(now).min(now));
+        out.entry(sp.block_id.clone()).or_default().push(iv);
+    }
+    for ivs in out.values_mut() {
+        *ivs = union(std::mem::take(ivs));
+    }
+    out
+}
+
 /// Wall-clock intervals during which a *break* block was running. Used to keep
 /// rest out of `outside_hours_ms`, which is about work.
-fn break_intervals(today: &[&TimeBlock], now: Millis) -> Vec<Iv> {
+fn break_intervals(spans: &SpansByBlock, today: &[&TimeBlock], now: Millis) -> Vec<Iv> {
     union(
         today
             .iter()
             .filter(|b| b.kind == BlockKind::Break)
-            .filter_map(|b| Some((b.started_at?, b.ended_at.unwrap_or(now).min(now))))
+            .flat_map(|b| match spans.get(&b.id) {
+                Some(ivs) => ivs.clone(),
+                // Pre-`work_spans` blocks: a break cannot be paused, so its
+                // whole life is one interval.
+                None => b
+                    .started_at
+                    .map(|st| vec![(st, b.ended_at.unwrap_or(now).min(now))])
+                    .unwrap_or_default(),
+            })
             .collect(),
     )
 }
@@ -213,14 +259,26 @@ fn break_intervals(today: &[&TimeBlock], now: Millis) -> Vec<Iv> {
 pub fn summarize(
     state: &MachineState,
     day_start: Millis,
+    day_end: Millis,
     now: Millis,
     available_ms: Millis,
     window: Option<Iv>,
 ) -> Summary {
+    // Clipped at both ends: `now` is inside the day whenever the app asks about
+    // today, but a block still running at the boundary must not spill the day
+    // it is being asked about into the next one (issue #11).
+    let day_iv: Iv = (day_start, now.clamp(day_start, day_end));
+    let spans = spans_by_block(state, now);
+    // What ran *during* the day, not what merely began in it (issue #11): a
+    // block started at 23:32 and worked until 13:12 the next day belongs to
+    // both days, for the part of it each day actually holds.
     let today: Vec<&TimeBlock> = state
         .blocks
         .iter()
-        .filter(|b| b.started_at.is_some_and(|t| t >= day_start))
+        .filter(|b| match spans.get(&b.id) {
+            Some(ivs) => !intersect(ivs, &[day_iv]).is_empty(),
+            None => b.started_at.is_some_and(|t| t >= day_start),
+        })
         .collect();
 
     let awaiting = state.timer_state == TimerState::AwaitingDecision;
@@ -230,7 +288,7 @@ pub fn summarize(
     let mut by_task: Vec<(TaskId, Millis)> = Vec::new();
     for b in work() {
         let Some(t) = b.task_id.clone() else { continue };
-        let ms = spent_ms(b, now);
+        let ms = spent_in_day(&spans, b, day_iv, now);
         match by_task.iter_mut().find(|(id, _)| id == &t) {
             Some(e) => e.1 += ms,
             None => by_task.push((t, ms)),
@@ -255,7 +313,7 @@ pub fn summarize(
     // Without it every Saturday, holiday and sick day reads as a wasted window.
     // The accepted cost is that a genuinely wasted working day is
     // indistinguishable from a day off — the app should not guess which.
-    let day = vec![(day_start, now.max(day_start))];
+    let day = vec![day_iv];
     let idle = idle_intervals(state, now);
     let window_iv: Vec<Iv> = match window {
         Some(w) if !today.is_empty() => intersect(&day, &union(vec![w])),
@@ -272,18 +330,18 @@ pub fn summarize(
     // D17/D18: work outside the window is recorded and reported; idle outside
     // it is not, because outside the window no claim of presence was made.
     let not_running = union(idle.iter().flat_map(|(_, ivs)| ivs.iter().copied()).collect());
-    let work_covered = subtract(&subtract(&day, &not_running), &break_intervals(&today, now));
+    let work_covered = subtract(&subtract(&day, &not_running), &break_intervals(&spans, &today, now));
     let outside_hours_ms = total(&intersect(
         &work_covered,
         &subtract(&day, &union(window.into_iter().collect())),
     ));
 
     let today_summary = Today {
-        worked_ms: work().map(|b| spent_ms(b, now)).sum(),
+        worked_ms: work().map(|b| spent_in_day(&spans, b, day_iv, now)).sum(),
         break_ms: today
             .iter()
             .filter(|b| b.kind == BlockKind::Break)
-            .map(|b| spent_ms(b, now))
+            .map(|b| spent_in_day(&spans, b, day_iv, now))
             .sum(),
         away_ms: today.iter().map(|b| away_of(b, current, awaiting, now)).sum(),
         idle_ms: idle_awaiting_ms + idle_paused_ms + idle_untracked_ms,
@@ -301,7 +359,12 @@ pub fn summarize(
             .iter()
             .filter(|t| matches!(t.status, TaskStatus::Todo | TaskStatus::InProgress))
             .count(),
-        blocks_completed: work().filter(|b| b.status == BlockStatus::Completed).count(),
+        // Counted on the day the block *finished*, so one that ran across
+        // midnight is not counted twice (issue #11).
+        blocks_completed: work()
+            .filter(|b| b.status == BlockStatus::Completed)
+            .filter(|b| b.ended_at.is_some_and(|e| e >= day_start && e < day_end))
+            .count(),
         switched_early: work().map(|b| b.interruptions).sum(),
         top,
     };
