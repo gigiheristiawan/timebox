@@ -1,6 +1,6 @@
 [package]
 name = "timebox"
-version = "0.3.1"
+version = "0.3.2"
 description = "Task rotation timeboxing for macOS"
 edition = "2021"
 rust-version = "1.77"
