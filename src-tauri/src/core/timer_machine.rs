@@ -81,11 +81,12 @@ pub enum Event {
 
     RemoveTask { task: TaskId },
     /// Adding never starts anything — the user chooses when work begins.
-    AddTask { title: String, block_ms: Millis, priority: Priority },
-    /// Rename and re-prioritise. Never touches the block: a task's allocation
-    /// is the timer's business, and editing one mid-block must not re-grant
-    /// time the way a fresh block would.
-    EditTask { task: TaskId, title: String, priority: Priority },
+    AddTask { title: String, block_ms: Millis, priority: Priority, daily: bool },
+    /// Rename, re-prioritise, and set whether the task recurs daily. Never
+    /// touches the block: a task's allocation is the timer's business, and
+    /// editing one mid-block must not re-grant time the way a fresh block
+    /// would.
+    EditTask { task: TaskId, title: String, priority: Priority, daily: bool },
     /// Grant a task more time: `ms` is *added*, never assigned. There is no way
     /// to shorten an allocation from here — trimming a running block would let
     /// a checkpoint be reached early and dodged, and trimming a parked one
@@ -157,10 +158,15 @@ impl MachineState {
 
 // ------------------------------------------------------------------ reducer
 
+/// `day_start` is the instant local midnight fell — injected for the same
+/// reason `core::summary` is handed it rather than computing it: a timezone is
+/// a shell concern and the core stays pure. It is what makes "already done
+/// today" answerable for a daily task (issue #16).
 pub fn reduce(
     mut state: MachineState,
     event: Event,
     now: Millis,
+    day_start: Millis,
     ids: &mut dyn IdSource,
 ) -> (MachineState, Vec<Effect>) {
     let mut fx = Vec::new();
@@ -179,7 +185,7 @@ pub fn reduce(
             }
         }
 
-        Event::SwitchTo { task } => switch_to(&mut state, &task, now, ids, &mut fx),
+        Event::SwitchTo { task } => switch_to(&mut state, &task, now, day_start, ids, &mut fx),
 
         Event::Pause => {
             if state.timer_state == TimerState::Running {
@@ -211,7 +217,7 @@ pub fn reduce(
                         queue::rotate_to_back(&mut state.queue, &t);
                     }
                 }
-                start_next(&mut state, now, ids, &mut fx);
+                start_next(&mut state, now, day_start, ids, &mut fx);
             }
         }
 
@@ -220,7 +226,7 @@ pub fn reduce(
                 if let Some(t) = b.task_id.clone() {
                     end_current(&mut state, BlockStatus::Completed, now);
                     finish_task(&mut state, &t, now);
-                    start_next(&mut state, now, ids, &mut fx);
+                    start_next(&mut state, now, day_start, ids, &mut fx);
                 }
             }
         }
@@ -234,7 +240,7 @@ pub fn reduce(
                     finish_task(&mut state, &t, now);
                 }
                 fx.push(Effect::LeaveCheckpoint);
-                start_next(&mut state, now, ids, &mut fx);
+                start_next(&mut state, now, day_start, ids, &mut fx);
             }
         }
 
@@ -247,7 +253,7 @@ pub fn reduce(
                     queue::rotate_to_back(&mut state.queue, &t);
                 }
                 fx.push(Effect::LeaveCheckpoint);
-                start_next(&mut state, now, ids, &mut fx);
+                start_next(&mut state, now, day_start, ids, &mut fx);
             }
         }
 
@@ -290,7 +296,7 @@ pub fn reduce(
                 settle_away(&mut state, now);
                 end_current(&mut state, BlockStatus::Completed, now);
                 fx.push(Effect::LeaveCheckpoint);
-                start_next(&mut state, now, ids, &mut fx);
+                start_next(&mut state, now, day_start, ids, &mut fx);
             }
         }
 
@@ -342,24 +348,36 @@ pub fn reduce(
             }
         }
 
-        Event::AddTask { title, block_ms, priority } => {
+        Event::AddTask { title, block_ms, priority, daily } => {
             let title = title.trim().to_string();
             if !title.is_empty() && block_ms > 0 {
                 let mut t = Task::new(ids.next_id(), title, block_ms, now);
                 t.priority = priority;
+                t.daily = daily;
                 state.queue.push(t.id.clone());
                 state.tasks.push(t);
             }
         }
 
-        Event::EditTask { task, title, priority } => {
+        Event::EditTask { task, title, priority, daily } => {
             let title = title.trim().to_string();
             // A blank title is rejected outright rather than half-applied:
             // AddTask refuses one, so an edit cannot be the way to get one.
             if !title.is_empty() {
+                let was_daily = state.tasks.iter().any(|t| t.id == task && t.daily);
                 if let Some(t) = state.task_mut(&task) {
                     t.title = title;
                     t.priority = priority;
+                    t.daily = daily;
+                }
+                // Turning recurrence *off* on a task completed earlier today
+                // would otherwise leave a Todo task carrying a completion
+                // stamp — neither done nor cleanly outstanding. It becomes an
+                // ordinary outstanding task, which is what "not daily" means.
+                if was_daily && !daily {
+                    if let Some(t) = state.task_mut(&task) {
+                        t.completed_at = None;
+                    }
                 }
             }
         }
@@ -429,7 +447,7 @@ pub fn reduce(
             if was_current {
                 settle_away(&mut state, now);
                 end_current(&mut state, BlockStatus::Cancelled, now);
-                start_next(&mut state, now, ids, &mut fx);
+                start_next(&mut state, now, day_start, ids, &mut fx);
             }
         }
     }
@@ -575,12 +593,42 @@ fn end_current(state: &mut MachineState, status: BlockStatus, now: Millis) {
     state.current_block_id = None;
 }
 
+/// Tick a task off. A daily is only ticked off *for today* (issue #16): it
+/// keeps `Todo` and keeps its place in the queue, and `completed_at` records
+/// the last time it was done, which is what `Task::done_today` reads.
+///
+/// Either way any parked block for the task is discarded. For an ordinary task
+/// the block is moot; for a daily it must not be, since tomorrow's work has to
+/// start from a fresh allocation rather than resume the remainder of a day
+/// that has already been closed out.
 fn finish_task(state: &mut MachineState, id: &TaskId, now: Millis) {
+    let daily = state.tasks.iter().any(|t| &t.id == id && t.daily);
     if let Some(t) = state.task_mut(id) {
-        t.status = TaskStatus::Done;
         t.completed_at = Some(now);
+        if !daily {
+            t.status = TaskStatus::Done;
+        } else {
+            t.status = TaskStatus::Todo;
+        }
     }
-    queue::remove(&mut state.queue, id);
+    if !daily {
+        queue::remove(&mut state.queue, id);
+    }
+
+    let parked: Vec<BlockId> = state
+        .blocks
+        .iter()
+        .filter(|b| {
+            b.task_id.as_ref() == Some(id) && b.is_parked(state.current_block_id.as_ref())
+        })
+        .map(|b| b.id.clone())
+        .collect();
+    for pid in parked {
+        if let Some(b) = state.block_mut(&pid) {
+            b.status = BlockStatus::Cancelled;
+            b.ended_at = Some(now);
+        }
+    }
 }
 
 fn expire(state: &mut MachineState, now: Millis, fx: &mut Vec<Effect>) {
@@ -632,8 +680,29 @@ fn start_break(
     fx.push(Effect::StartTicking);
 }
 
-fn start_next(state: &mut MachineState, now: Millis, ids: &mut dyn IdSource, fx: &mut Vec<Effect>) {
-    match queue::head(&state.queue).cloned() {
+/// Advance to the next *startable* task. Not simply the queue head: a daily
+/// already ticked for today keeps its place in the queue rather than leaving
+/// it (issue #16), so rotation has to step over it. When nothing is startable
+/// the timer goes idle, which is also the answer on a day whose dailies are
+/// all done.
+fn start_next(
+    state: &mut MachineState,
+    now: Millis,
+    day_start: Millis,
+    ids: &mut dyn IdSource,
+    fx: &mut Vec<Effect>,
+) {
+    let next = state
+        .queue
+        .iter()
+        .find(|id| {
+            state
+                .tasks
+                .iter()
+                .any(|t| &&t.id == id && t.is_startable(day_start))
+        })
+        .cloned();
+    match next {
         Some(t) => start_task(state, &t, now, ids, fx),
         None => {
             state.timer_state = TimerState::Idle;
@@ -721,6 +790,7 @@ fn switch_to(
     state: &mut MachineState,
     task: &TaskId,
     now: Millis,
+    day_start: Millis,
     ids: &mut dyn IdSource,
     fx: &mut Vec<Effect>,
 ) {
@@ -729,6 +799,16 @@ fn switch_to(
         return;
     }
     if state.current_block().and_then(|b| b.task_id.clone()).as_ref() == Some(task) {
+        return;
+    }
+    // A daily already done for today is inert until tomorrow, so an explicit
+    // click is refused exactly as rotation skips it — otherwise the tick would
+    // be a suggestion rather than a fact about the day.
+    if !state
+        .tasks
+        .iter()
+        .any(|t| &t.id == task && t.is_startable(day_start))
+    {
         return;
     }
 

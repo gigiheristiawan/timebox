@@ -14,6 +14,10 @@ export interface Task {
   status: TaskStatus;
   priority: Priority;
   blockDurationMs: number;
+  /** Recurs every day (issue #16). A daily is never `Done` and never leaves
+   *  the queue; `completedAt` records the *last* time it was ticked off. Use
+   *  `Snapshot.doneToday` rather than comparing that against a date here. */
+  daily: boolean;
   createdAt: number;
   completedAt: number | null;
 }
@@ -122,6 +126,9 @@ export interface Snapshot {
   /** Whether macOS actually has the login item registered. Not the same as
    *  `settings.launchAtLogin`, which is only what the user asked for. */
   launchAtLoginActive: boolean;
+  /** Ids of daily tasks already ticked off for today. Computed in Rust because
+   *  local midnight is a shell concern and the UI does no date arithmetic. */
+  doneToday: string[];
 }
 
 export interface HealthReport {
@@ -144,8 +151,8 @@ export type Action =
   | { kind: "endBreak" }
   | { kind: "extendBreak"; ms: number }
   | { kind: "startBreak"; ms: number }
-  | { kind: "addTask"; title: string; blockMs: number; priority: Priority }
-  | { kind: "editTask"; task: string; title: string; priority: Priority }
+  | { kind: "addTask"; title: string; blockMs: number; priority: Priority; daily: boolean }
+  | { kind: "editTask"; task: string; title: string; priority: Priority; daily: boolean }
   | { kind: "addTime"; task: string; ms: number }
   | { kind: "removeTask"; task: string }
   | { kind: "reorder"; moved: string; before: string };

@@ -31,6 +31,10 @@ pub struct Snapshot {
     /// was switched off in System Settings. The UI says so rather than showing
     /// a toggle that lies.
     pub launch_at_login_active: bool,
+    /// Ids of daily tasks already ticked off for today (issue #16). Computed
+    /// here for the same reason `summary` is: local midnight is a shell
+    /// concern, and the UI must not do date arithmetic of its own (SPEC R7).
+    pub done_today: Vec<crate::core::model::TaskId>,
 }
 
 fn snapshot_of(app: &App) -> Snapshot {
@@ -55,6 +59,12 @@ fn snapshot_of(app: &App) -> Snapshot {
             settings.available_work_ms_per_day,
             window_for(day_start, &settings),
         ),
+        done_today: state
+            .tasks
+            .iter()
+            .filter(|t| t.done_today(day_start))
+            .map(|t| t.id.clone())
+            .collect(),
         settings,
         state,
         now,
@@ -79,9 +89,9 @@ pub enum Action {
     ExtendBreak { ms: Millis },
     StartBreak { ms: Millis },
     #[serde(rename_all = "camelCase")]
-    AddTask { title: String, block_ms: Millis, priority: Priority },
+    AddTask { title: String, block_ms: Millis, priority: Priority, daily: bool },
     #[serde(rename_all = "camelCase")]
-    EditTask { task: String, title: String, priority: Priority },
+    EditTask { task: String, title: String, priority: Priority, daily: bool },
     #[serde(rename_all = "camelCase")]
     AddTime { task: String, ms: Millis },
     RemoveTask { task: String },
@@ -107,8 +117,12 @@ impl From<Action> for Event {
             // String: `Priority::parse` reads the *database* encoding (`HIGH`),
             // the UI sends the serde one (`High`), so every task silently
             // landed on the `unwrap_or` and stored MEDIUM.
-            Action::AddTask { title, block_ms, priority } => Event::AddTask { title, block_ms, priority },
-            Action::EditTask { task, title, priority } => Event::EditTask { task, title, priority },
+            Action::AddTask { title, block_ms, priority, daily } => {
+                Event::AddTask { title, block_ms, priority, daily }
+            }
+            Action::EditTask { task, title, priority, daily } => {
+                Event::EditTask { task, title, priority, daily }
+            }
             Action::AddTime { task, ms } => Event::AddTime { task, ms },
             Action::RemoveTask { task } => Event::RemoveTask { task },
             Action::Reorder { moved, before } => Event::Reorder { moved, before },
@@ -275,13 +289,37 @@ mod tests {
     fn add_task_carries_the_priority_the_ui_sent() {
         for (sent, want) in [("High", Priority::High), ("Medium", Priority::Medium), ("Low", Priority::Low)] {
             let json = format!(
-                r#"{{"kind":"addTask","title":"t","blockMs":900000,"priority":"{sent}"}}"#
+                r#"{{"kind":"addTask","title":"t","blockMs":900000,"priority":"{sent}","daily":false}}"#
             );
             let action: Action = serde_json::from_str(&json).expect("the UI's shape must deserialize");
             match Event::from(action) {
                 Event::AddTask { priority, .. } => assert_eq!(priority, want),
                 e => panic!("expected AddTask, got {e:?}"),
             }
+        }
+    }
+
+    /// `daily` rides the same wire (issue #16). It is a plain bool rather than
+    /// a recurrence enum, so the only way to get it wrong is the field name —
+    /// which is exactly what this pins.
+    #[test]
+    fn the_daily_flag_crosses_the_wire_on_both_task_actions() {
+        let add: Action = serde_json::from_str(
+            r#"{"kind":"addTask","title":"Standup","blockMs":900000,"priority":"Medium","daily":true}"#,
+        )
+        .expect("the UI's shape must deserialize");
+        match Event::from(add) {
+            Event::AddTask { daily, .. } => assert!(daily),
+            e => panic!("expected AddTask, got {e:?}"),
+        }
+
+        let edit: Action = serde_json::from_str(
+            r#"{"kind":"editTask","task":"t1","title":"Standup","priority":"Medium","daily":true}"#,
+        )
+        .expect("the UI's shape must deserialize");
+        match Event::from(edit) {
+            Event::EditTask { daily, .. } => assert!(daily),
+            e => panic!("expected EditTask, got {e:?}"),
         }
     }
 }

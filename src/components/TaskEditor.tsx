@@ -18,13 +18,14 @@ export function TaskEditor({ task, onDone }: { task: Task; onDone: () => void })
   const { send } = useTimebox();
   const [title, setTitle] = useState(task.title);
   const [priority, setPriority] = useState<Priority>(task.priority);
+  const [daily, setDaily] = useState(task.daily);
   // Held as a draft rather than dispatched per click, so Cancel means cancel.
   const [addedMs, setAddedMs] = useState(0);
   const blank = title.trim() === "";
 
   const save = () => {
     if (blank) return;
-    void send({ kind: "editTask", task: task.id, title, priority });
+    void send({ kind: "editTask", task: task.id, title, priority, daily });
     if (addedMs > 0) void send({ kind: "addTime", task: task.id, ms: addedMs });
     onDone();
   };
@@ -60,6 +61,18 @@ export function TaskEditor({ task, onDone }: { task: Task; onDone: () => void })
         <option value="Medium">Medium</option>
         <option value="Low">Low</option>
       </select>
+      <label
+        title="Recurs every day: ticking it off never removes it from the queue"
+        className="flex cursor-pointer items-center gap-1.5 text-[12.5px] text-ink-2"
+      >
+        <input
+          type="checkbox"
+          checked={daily}
+          onChange={(e) => setDaily(e.target.checked)}
+          className="accent-accent"
+        />
+        Daily
+      </label>
       <div className="flex items-center gap-1">
         {ADD_CHOICES.map((m) => (
           <button

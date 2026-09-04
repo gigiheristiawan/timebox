@@ -10,6 +10,7 @@ export function AddTask() {
   // rest of the session, so a one-off 45m task does not change the setting.
   const [chosen, setChosen] = useState<number | null>(null);
   const [priority, setPriority] = useState<Priority>("Medium");
+  const [daily, setDaily] = useState(false);
   const [touched, setTouched] = useState(false);
 
   const defaultMinutes = Math.round((snap?.settings.defaultBlockDurationMs ?? 30 * MIN) / MIN);
@@ -20,8 +21,9 @@ export function AddTask() {
     e.preventDefault();
     setTouched(true);
     if (title.trim() === "") return;
-    void send({ kind: "addTask", title, blockMs: minutes * MIN, priority });
+    void send({ kind: "addTask", title, blockMs: minutes * MIN, priority, daily });
     setTitle("");
+    setDaily(false);
     setTouched(false);
   };
 
@@ -62,6 +64,18 @@ export function AddTask() {
         <option value="Medium">Medium</option>
         <option value="Low">Low</option>
       </select>
+      <label
+        title="Recurs every day: ticking it off never removes it from the queue"
+        className="flex cursor-pointer items-center gap-1.5 px-1 py-1.5 text-[12.5px] text-ink-2"
+      >
+        <input
+          type="checkbox"
+          checked={daily}
+          onChange={(e) => setDaily(e.target.checked)}
+          className="accent-accent"
+        />
+        Daily
+      </label>
       <button
         type="submit"
         className="rounded-[7px] border border-line-2 bg-surface px-[13px] py-1.5 text-[13px] font-medium transition-colors hover:bg-surface-3"

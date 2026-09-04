@@ -149,7 +149,15 @@ pub struct Task {
     pub status: TaskStatus,
     pub priority: Priority,
     pub block_duration_ms: Millis,
+    /// A task that recurs every day (issue #16). Completing one never sets
+    /// `Done` and never removes it from the queue — it is only *done for
+    /// today*, which is derived from `completed_at` rather than stored, so
+    /// there is no midnight reset to fire and nothing to miss if the app was
+    /// closed when the day turned over.
+    pub daily: bool,
     pub created_at: Millis,
+    /// For an ordinary task, when it was completed. For a daily, when it was
+    /// *last* completed — it goes on recurring.
     pub completed_at: Option<Millis>,
 }
 
@@ -161,9 +169,25 @@ impl Task {
             status: TaskStatus::Todo,
             priority: Priority::Medium,
             block_duration_ms: block_ms,
+            daily: false,
             created_at: now,
             completed_at: None,
         }
+    }
+
+    /// Whether this task has already been done for the day beginning at
+    /// `day_start`. Only ever true for a daily: an ordinary task leaves the
+    /// queue when it is completed, so the question does not arise.
+    pub fn done_today(&self, day_start: Millis) -> bool {
+        self.daily && self.completed_at.is_some_and(|c| c >= day_start)
+    }
+
+    /// Whether this task can be started right now. A daily already ticked for
+    /// today is inert — rotation skips it and a click on its row is refused,
+    /// which is one rule rather than two.
+    pub fn is_startable(&self, day_start: Millis) -> bool {
+        !matches!(self.status, TaskStatus::Done | TaskStatus::Cancelled)
+            && !self.done_today(day_start)
     }
 }
 

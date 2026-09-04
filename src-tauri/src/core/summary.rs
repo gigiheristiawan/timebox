@@ -349,15 +349,26 @@ pub fn summarize(
         idle_paused_ms,
         idle_untracked_ms,
         outside_hours_ms,
+        // A daily counts here exactly like any other completion (issue #16),
+        // even though it stays `Todo` and stays in the queue — ticking one off
+        // is a thing you did today.
         tasks_completed: state
             .tasks
             .iter()
-            .filter(|t| t.status == TaskStatus::Done && t.completed_at.is_some_and(|c| c >= day_start))
+            .filter(|t| {
+                (t.status == TaskStatus::Done || t.daily)
+                    && t.completed_at.is_some_and(|c| c >= day_start)
+            })
             .count(),
+        // …and correspondingly stops being outstanding until tomorrow, or it
+        // would be counted in both columns at once.
         tasks_pending: state
             .tasks
             .iter()
-            .filter(|t| matches!(t.status, TaskStatus::Todo | TaskStatus::InProgress))
+            .filter(|t| {
+                matches!(t.status, TaskStatus::Todo | TaskStatus::InProgress)
+                    && !t.done_today(day_start)
+            })
             .count(),
         // Counted on the day the block *finished*, so one that ran across
         // midnight is not counted twice (issue #11).

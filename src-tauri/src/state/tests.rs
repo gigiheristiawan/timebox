@@ -24,7 +24,7 @@ fn quit_and_relaunch(db: Db, state: &MachineState, saved_at: Millis, later: Mill
     db.with_mut(|c| repo::save(c, state, saved_at)).unwrap();
     let reloaded = db.with(repo::load).unwrap();
     let mut ids = SeqIds::new("r");
-    let (resolved, _) = crate::core::timer_machine::reduce(reloaded, Event::Tick, later, &mut ids);
+    let (resolved, _) = crate::core::timer_machine::reduce(reloaded, Event::Tick, later, 0, &mut ids);
     (db, resolved)
 }
 
@@ -155,7 +155,7 @@ fn hydrate_resolves_expiry_before_returning() {
     let db = Db::in_memory().unwrap();
     let mut s = seeded();
     let mut ids = SeqIds::new("h");
-    let (s2, _) = crate::core::timer_machine::reduce(s.clone(), Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+    let (s2, _) = crate::core::timer_machine::reduce(s.clone(), Event::SwitchTo { task: "A".into() }, 0, 0, &mut ids);
     s = s2;
     db.with_mut(|c| repo::save(c, &s, 0)).unwrap();
 
@@ -291,4 +291,28 @@ fn the_window_is_empty_on_a_day_the_user_does_not_work() {
 
     let all_week = Settings { working_weekdays: 0b111_1111, ..weekdays_only };
     assert!(window_for(saturday, &all_week).is_some(), "the weekend can be switched on");
+}
+
+/// Issue #16 — recurrence has to survive a restart, and so does the completion
+/// stamp it is read against. Losing either would make a daily either start
+/// over as an ordinary task or come back already outstanding on a day it was
+/// finished.
+#[test]
+fn t61_a_daily_task_and_its_last_completion_survive_a_restart() {
+    let db = Db::in_memory().unwrap();
+    let mut s = seeded();
+    let a = s.tasks.iter_mut().find(|t| t.id == "A").unwrap();
+    a.daily = true;
+    a.completed_at = Some(10 * MIN);
+
+    let (_db, back) = quit_and_relaunch(db, &s, 11 * MIN, 12 * MIN);
+
+    let a = back.tasks.iter().find(|t| t.id == "A").unwrap();
+    assert!(a.daily, "recurrence is a property of the task, not of the session");
+    assert_eq!(a.status, TaskStatus::Todo, "a daily is never stored as Done");
+    assert!(a.done_today(0), "and is still ticked off for the day it was finished");
+    assert!(back.queue.contains(&"A".to_string()), "it stays queued across a restart");
+
+    let b = back.tasks.iter().find(|t| t.id == "B").unwrap();
+    assert!(!b.daily);
 }
