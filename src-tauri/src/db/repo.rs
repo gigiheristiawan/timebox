@@ -80,8 +80,9 @@ pub fn save(conn: &mut Connection, state: &MachineState, now: Millis) -> rusqlit
     }
 
     tx.execute(
-        "UPDATE app_state SET timer_state=?1, current_block_id=?2, updated_at=?3 WHERE id=1",
-        params![state.timer_state.as_str(), state.current_block_id, now],
+        "UPDATE app_state SET timer_state=?1, current_block_id=?2, updated_at=?3,
+                pomodoro_since=?4 WHERE id=1",
+        params![state.timer_state.as_str(), state.current_block_id, now, state.pomodoro_since],
     )?;
 
     tx.commit()
@@ -211,14 +212,14 @@ pub fn load(conn: &Connection) -> rusqlite::Result<MachineState> {
         }
     }
 
-    let (timer_state, current_block_id): (String, Option<String>) = conn
+    let (timer_state, current_block_id, pomodoro_since): (String, Option<String>, Option<Millis>) = conn
         .query_row(
-            "SELECT timer_state, current_block_id FROM app_state WHERE id = 1",
+            "SELECT timer_state, current_block_id, pomodoro_since FROM app_state WHERE id = 1",
             [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?
-        .unwrap_or_else(|| (TimerState::Idle.as_str().to_string(), None));
+        .unwrap_or_else(|| (TimerState::Idle.as_str().to_string(), None, None));
 
     Ok(MachineState {
         timer_state: TimerState::parse(&timer_state).unwrap_or(TimerState::Idle),
@@ -230,5 +231,6 @@ pub fn load(conn: &Connection) -> rusqlite::Result<MachineState> {
         open_idle,
         work_spans,
         open_work,
+        pomodoro_since,
     })
 }

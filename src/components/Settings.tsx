@@ -18,7 +18,7 @@ const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
  * presentation; expiry always requires a decision.
  */
 export function Settings() {
-  const { snap, error, init, saveSettings } = useTimebox();
+  const { snap, error, init, saveSettings, send } = useTimebox();
 
   useEffect(() => {
     let un: (() => void) | undefined;
@@ -67,6 +67,15 @@ export function Settings() {
 
       <div className="flex flex-col gap-[9px]">
         <SectionLabel>Timer</SectionLabel>
+        <Toggle
+          label="Pomodoro mode"
+          // Not a settings write: the mode and the instant it counts from are
+          // one change, and the reducer refuses the flip while a checkpoint is
+          // open (POMODORO_MODE D33, §4.6).
+          on={snap.pomodoro !== null}
+          onChange={(v) => void send({ kind: "setPomodoroMode", on: v })}
+          note={`Offers a break every 25 minutes of work, on top of each task's own block. Breaks use the ${Math.round(s.defaultBreakDurationMs / 60_000)}-minute default below.`}
+        />
         <Row label="Default block duration">
           <MinuteSelect
             label="Default block duration"

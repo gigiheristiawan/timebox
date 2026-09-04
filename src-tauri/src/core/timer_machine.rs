@@ -35,6 +35,14 @@ pub struct MachineState {
     /// the timer is RUNNING — the complement of `open_idle`.
     #[serde(skip)]
     pub open_work: Option<WorkSpan>,
+
+    /// The instant the current pomodoro accrues from (POMODORO_MODE §3.1).
+    /// `Some` exactly when Pomodoro mode is on — this *is* the mode flag, so
+    /// there is no second copy in settings to drift out of step with it.
+    /// Persisted: an open pomodoro must survive a quit the way an open idle
+    /// span does.
+    #[serde(skip)]
+    pub pomodoro_since: Option<Millis>,
 }
 
 impl Default for MachineState {
@@ -49,6 +57,7 @@ impl Default for MachineState {
             open_idle: None,
             work_spans: Vec::new(),
             open_work: None,
+            pomodoro_since: None,
         }
     }
 }
@@ -79,6 +88,14 @@ pub enum Event {
     /// return to the same work, not a rotation away from it.
     StartBreak { ms: Millis },
 
+    /// Answer the Pomodoro prompt: take the break (POMODORO_MODE D30).
+    DecidePomodoroBreak { ms: Millis },
+    /// Answer the Pomodoro prompt: keep working. Resets the clock (D29).
+    DecideSkipPomodoro,
+    /// Turn Pomodoro mode on or off (D33). Routed through `reduce` rather than
+    /// `update_settings` so the flag and the reset instant are one write.
+    SetPomodoroMode { on: bool },
+
     RemoveTask { task: TaskId },
     /// Adding never starts anything — the user chooses when work begins.
     AddTask { title: String, block_ms: Millis, priority: Priority, daily: bool },
@@ -99,10 +116,10 @@ pub enum Event {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     Persist,
-    EnterCheckpoint { block: BlockId, kind: BlockKind },
+    EnterCheckpoint { block: BlockId, kind: CheckpointKind },
     LeaveCheckpoint,
     PlayExpirySound,
-    Notify { kind: BlockKind, task_title: Option<String>, allocated_minutes: i64 },
+    Notify { kind: CheckpointKind, task_title: Option<String>, allocated_minutes: i64 },
     StartTicking,
     StopTicking,
     UpdateMenuBar,
@@ -139,12 +156,51 @@ impl MachineState {
 
     /// How long an unanswered checkpoint has been waiting (SPEC D13).
     /// `None` unless a checkpoint is actually open.
+    ///
+    /// The two checkpoints measure from different marks. A work checkpoint's
+    /// block has expired, so `end_at` is when the wait began. A Pomodoro
+    /// prompt's block is *parked* with `end_at` still in the future, so
+    /// `end_at` would give 0 however long the prompt is ignored — it reads
+    /// `paused_at` instead (POMODORO_MODE §6.1).
     pub fn staleness_ms(&self, now: Millis) -> Option<Millis> {
-        if self.timer_state != TimerState::AwaitingDecision {
-            return None;
-        }
-        let expired_at = self.current_block()?.end_at?;
-        Some((now - expired_at).max(0))
+        let from = match self.timer_state {
+            TimerState::AwaitingDecision => self.current_block()?.end_at?,
+            TimerState::AwaitingPomodoro => self.current_block()?.paused_at?,
+            _ => return None,
+        };
+        Some((now - from).max(0))
+    }
+
+    /// Work banked toward the current pomodoro (POMODORO_MODE §3.1).
+    ///
+    /// Derived from `work_spans` rather than accumulated, so a pause parks it
+    /// with no code at all and a quit needs no recovery path. Break spans are
+    /// excluded by kind as well as by construction: a break's end resets
+    /// `pomodoro_since`, so one should never fall inside the window anyway.
+    pub fn pomodoro_elapsed_ms(&self, now: Millis) -> Option<Millis> {
+        let since = self.pomodoro_since?;
+        let is_work = |id: &BlockId| {
+            self.blocks.iter().any(|b| &b.id == id && b.kind == BlockKind::Work)
+        };
+        let overlap = |from: Millis, to: Millis| (to.min(now) - from.max(since)).max(0);
+        let closed: Millis = self
+            .work_spans
+            .iter()
+            .filter(|s| is_work(&s.block_id))
+            .map(|s| overlap(s.started_at, s.ended_at.unwrap_or(now)))
+            .sum();
+        let open = self
+            .open_work
+            .as_ref()
+            .filter(|s| is_work(&s.block_id))
+            .map_or(0, |s| overlap(s.started_at, now));
+        Some(closed + open)
+    }
+
+    /// How long until the Pomodoro prompt is due. `None` when the mode is off.
+    pub fn pomodoro_remaining_ms(&self, now: Millis) -> Option<Millis> {
+        self.pomodoro_elapsed_ms(now)
+            .map(|e| (POMODORO_WORK_MS - e).max(0))
     }
 
     fn task_mut(&mut self, id: &TaskId) -> Option<&mut Task> {
@@ -155,6 +211,9 @@ impl MachineState {
         self.blocks.iter_mut().find(|b| &b.id == id)
     }
 }
+
+/// The Pomodoro work interval. Fixed, not a setting (POMODORO_MODE D32).
+pub const POMODORO_WORK_MS: Millis = 25 * 60_000;
 
 // ------------------------------------------------------------------ reducer
 
@@ -180,7 +239,14 @@ pub fn reduce(
                     .and_then(|b| b.end_at)
                     .is_some_and(|end| now >= end);
                 if expired {
+                    // The task checkpoint wins a tie and the Pomodoro prompt is
+                    // dropped, not queued (POMODORO_MODE D31): the task
+                    // checkpoint already offers a break, and two blocking
+                    // windows for one moment is the interruption the mode
+                    // exists to bound.
                     expire(&mut state, now, &mut fx);
+                } else if pomodoro_due(&state, now) {
+                    enter_pomodoro(&mut state, now, &mut fx);
                 }
             }
         }
@@ -208,7 +274,9 @@ pub fn reduce(
         }
 
         Event::Skip => {
-            if let Some(b) = state.current_block().cloned() {
+            // The checkpoint has no exit (§4.7). Unguarded, this ended the
+            // block and rotated the task straight out of the prompt.
+            if let Some(b) = state.current_block().cloned().filter(|_| !at_any_checkpoint(&state)) {
                 if b.kind == BlockKind::Break {
                     end_current(&mut state, BlockStatus::Completed, now);
                 } else {
@@ -222,7 +290,8 @@ pub fn reduce(
         }
 
         Event::CompleteCurrentTask => {
-            if let Some(b) = state.current_block().cloned() {
+            // Reachable from the popover while the prompt is up (§4.7).
+            if let Some(b) = state.current_block().cloned().filter(|_| !at_any_checkpoint(&state)) {
                 if let Some(t) = b.task_id.clone() {
                     end_current(&mut state, BlockStatus::Completed, now);
                     finish_task(&mut state, &t, now);
@@ -334,7 +403,10 @@ pub fn reduce(
         Event::StartBreak { ms } => {
             // The checkpoint has no side doors, and during a break the
             // operation is ExtendBreak (tests 44, 45).
-            if ms > 0 && !at_work_checkpoint(&state) && !state.on_break() {
+            // The negation matters: `!at_work_checkpoint` alone is *true* at a
+            // Pomodoro prompt, which made the tray's break item a side door out
+            // of a checkpoint that has none (§4.7).
+            if ms > 0 && !at_any_checkpoint(&state) && !state.on_break() {
                 if let Some(id) = state.current_block_id.clone() {
                     if state.timer_state == TimerState::Running {
                         // Parked, not ended, and with no interruption counted:
@@ -420,6 +492,43 @@ pub fn reduce(
             queue::move_before(&mut state.queue, &moved, &before);
         }
 
+        Event::DecidePomodoroBreak { ms } => {
+            if state.timer_state == TimerState::AwaitingPomodoro && ms > 0 {
+                // The work block stays parked, holding its remainder; the break
+                // is a new block beside it, exactly as `StartBreak` builds one.
+                state.current_block_id = None;
+                state.pomodoro_since = Some(now);
+                fx.push(Effect::LeaveCheckpoint);
+                start_break(&mut state, ms, now, ids, &mut fx);
+            }
+        }
+
+        Event::DecideSkipPomodoro => {
+            if state.timer_state == TimerState::AwaitingPomodoro {
+                if let Some(id) = state.current_block_id.clone() {
+                    unpark(&mut state, &id, now);
+                    state.timer_state = TimerState::Running;
+                    // A full 25 rather than a shorter re-prompt: a mode that
+                    // argues with the answer it just received is worse than one
+                    // that does not ask (D29).
+                    state.pomodoro_since = Some(now);
+                    fx.push(Effect::LeaveCheckpoint);
+                    fx.push(Effect::StartTicking);
+                }
+            }
+        }
+
+        Event::SetPomodoroMode { on } => {
+            // Refused at a checkpoint, or switching the mode off would be a way
+            // to dismiss its own prompt (D33).
+            if !at_any_checkpoint(&state) {
+                // On: a fresh 25 from now. Crediting the running block's
+                // elapsed work could fire a prompt the instant the toggle is
+                // flipped, which reads as a bug.
+                state.pomodoro_since = if on { Some(now) } else { None };
+            }
+        }
+
         Event::RemoveTask { task } => {
             queue::remove(&mut state.queue, &task);
             // A parked block for a removed task would otherwise linger and be
@@ -445,6 +554,11 @@ pub fn reduce(
                 .and_then(|b| b.task_id.clone())
                 .is_some_and(|t| t == task);
             if was_current {
+                // Without this the window stays on screen over a block that no
+                // longer exists — and it has no close affordance (§6.2).
+                if at_any_checkpoint(&state) {
+                    fx.push(Effect::LeaveCheckpoint);
+                }
                 settle_away(&mut state, now);
                 end_current(&mut state, BlockStatus::Cancelled, now);
                 start_next(&mut state, now, day_start, ids, &mut fx);
@@ -468,6 +582,42 @@ fn at_work_checkpoint(s: &MachineState) -> bool {
 
 fn at_break_checkpoint(s: &MachineState) -> bool {
     s.timer_state == TimerState::AwaitingDecision && s.on_break()
+}
+
+/// Any checkpoint at all. "The checkpoint has no exit" was enforced by four
+/// positive `at_work_checkpoint` tests and two accidents; it is enforced by
+/// this instead, so the next state added does not re-open the same doors
+/// (POMODORO_MODE §4.7).
+fn at_any_checkpoint(s: &MachineState) -> bool {
+    matches!(
+        s.timer_state,
+        TimerState::AwaitingDecision | TimerState::AwaitingPomodoro
+    )
+}
+
+fn pomodoro_due(s: &MachineState, now: Millis) -> bool {
+    s.pomodoro_elapsed_ms(now)
+        .is_some_and(|e| e >= POMODORO_WORK_MS)
+}
+
+/// Open the Pomodoro prompt. The work block is **parked**, not expired: `park`
+/// holds its remainder, where `expire` would set `status = AwaitingDecision`
+/// and throw the remainder away (POMODORO_MODE §4.5).
+fn enter_pomodoro(state: &mut MachineState, now: Millis, fx: &mut Vec<Effect>) {
+    let Some(id) = state.current_block_id.clone() else { return };
+    park(state, &id, now);
+    state.timer_state = TimerState::AwaitingPomodoro;
+
+    let title = state.current_task().map(|t| t.title.clone());
+    let kind = CheckpointKind::Pomodoro;
+    fx.push(Effect::StopTicking);
+    fx.push(Effect::EnterCheckpoint { block: id, kind });
+    fx.push(Effect::PlayExpirySound);
+    fx.push(Effect::Notify {
+        kind,
+        task_title: title,
+        allocated_minutes: POMODORO_WORK_MS / 60_000,
+    });
 }
 
 /// Bracket every instant the timer is not running (IDLE_TIME §5.4).
@@ -580,8 +730,18 @@ fn unpark(state: &mut MachineState, id: &BlockId, now: Millis) {
     }
 }
 
+/// A break *ending* resets the pomodoro clock (POMODORO_MODE D29, §3.2).
+///
+/// This is the one place every break's ending passes through — `EndBreak` and
+/// `Skip` during a break both land here. A break block *expiring* is
+/// deliberately not a reset point: expiry opens the break checkpoint, and the
+/// interval spent waiting to answer it is not rest.
 fn end_current(state: &mut MachineState, status: BlockStatus, now: Millis) {
     if let Some(id) = state.current_block_id.clone() {
+        let was_break = state.block_mut(&id).map(|b| b.kind) == Some(BlockKind::Break);
+        if was_break && state.pomodoro_since.is_some() {
+            state.pomodoro_since = Some(now);
+        }
         if let Some(b) = state.block_mut(&id) {
             // Capped, so a block reopened days later cannot report days of work.
             let cap = b.alloc_ms();
@@ -638,7 +798,7 @@ fn expire(state: &mut MachineState, now: Millis, fx: &mut Vec<Effect>) {
         b.accumulated_active_ms = b.active_ms(now);
         b.last_resume_at = None;
         b.status = BlockStatus::AwaitingDecision;
-        (b.kind, b.alloc_ms() / 60_000)
+        (CheckpointKind::from(b.kind), b.alloc_ms() / 60_000)
     };
     state.timer_state = TimerState::AwaitingDecision;
 
@@ -740,7 +900,7 @@ fn start_task(
             let kind = state.block_mut(&id).map(|b| {
                 b.status = BlockStatus::AwaitingDecision;
                 b.end_at = Some(now);
-                b.kind
+                CheckpointKind::from(b.kind)
             });
             state.timer_state = TimerState::AwaitingDecision;
             if let Some(kind) = kind {
@@ -794,8 +954,11 @@ fn switch_to(
     ids: &mut dyn IdSource,
     fx: &mut Vec<Effect>,
 ) {
-    // A work checkpoint must be answered; switching is not an escape hatch.
-    if at_work_checkpoint(state) {
+    // A checkpoint must be answered; switching is not an escape hatch. Either
+    // checkpoint: a positive `at_work_checkpoint` test used as a *refusal* has
+    // the same polarity trap as `StartBreak`'s negation used as permission —
+    // false means "allowed", and it is false at a Pomodoro prompt (§4.7).
+    if at_any_checkpoint(state) {
         return;
     }
     if state.current_block().and_then(|b| b.task_id.clone()).as_ref() == Some(task) {

@@ -36,6 +36,16 @@ export default function App() {
       const snap = useTimebox.getState().snap;
       const state = snap?.state.timerState;
 
+      // The Pomodoro prompt owns the keyboard the same way (POMODORO_MODE
+      // D30): its two answers, and everything else inert.
+      if (state === "AwaitingPomodoro") {
+        if (e.key === "1" || e.key === "Enter") {
+          void send({ kind: "decidePomodoroBreak", ms: breakDefaultMs(snap) });
+        }
+        if (e.key === "2") void send({ kind: "decideSkipPomodoro" });
+        return;
+      }
+
       if (state === "AwaitingDecision") {
         const ms = breakDefaultMs(snap);
         if (isBreak(snap)) {

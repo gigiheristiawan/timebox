@@ -3,7 +3,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { clockStr, durStr } from "../core/format";
 import { openMainWindow, openSettingsWindow, requestQuit } from "../ipc/commands";
 import { breakDefaultMs, currentBlock, currentTask, isBreak, parkedFor, taskById, useTimebox } from "../stores/useTimebox";
-import { Countdown } from "./Countdown";
+import { Countdown, PomodoroCountdown } from "./Countdown";
 import { PriorityDot } from "./ui";
 
 /** Matches `.popover` in docs/mockup.html — the design reference for this window. */
@@ -63,7 +63,12 @@ export function Popover() {
   const breakMin = chosenBreakMin ?? Math.round(breakDefaultMs(snap ?? null) / 60_000);
   // D22: available from IDLE, RUNNING and PAUSED. At a work checkpoint the
   // decision is owed first, and during a break the operation is Extend.
-  const canBreak = !!snap && state !== "AwaitingDecision" && !onBreak;
+  // Either checkpoint. `!== "AwaitingDecision"` alone left this true at the
+  // Pomodoro prompt, offering a control the reducer refuses (POMODORO_MODE
+  // §4.7) — a button that looks live and does nothing.
+  const atCheckpoint = state === "AwaitingDecision" || state === "AwaitingPomodoro";
+  const canBreak = !!snap && !atCheckpoint && !onBreak;
+  const pomodoroOn = snap?.pomodoro != null;
 
   return (
     <div
@@ -84,9 +89,23 @@ export function Popover() {
 
         <Countdown
           className={`block pb-0.5 pt-1.5 text-center text-[34px] font-medium leading-none tracking-[-0.02em] ${
-            state === "AwaitingDecision" ? "text-alert" : onBreak ? "text-rest" : paused ? "text-ink-3" : ""
+            state === "AwaitingDecision"
+              ? "text-alert"
+              : state === "AwaitingPomodoro"
+                ? "text-rest"
+                : onBreak
+                  ? "text-rest"
+                  : paused
+                    ? "text-ink-3"
+                    : ""
           }`}
         />
+
+        {snap?.pomodoro && !onBreak && (
+          <div className="flex items-baseline justify-center gap-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-3">
+            break in <PomodoroCountdown className="text-[11px] text-rest" />
+          </div>
+        )}
 
         {next && (
           <>
@@ -96,10 +115,18 @@ export function Popover() {
         )}
 
         <div className="mt-2 flex gap-2">
-          {state === "AwaitingDecision" ? (
+          {atCheckpoint ? (
             // The checkpoint owns the decision and has no side doors (SPEC §7.4).
-            <p className="flex-1 rounded-md bg-alert-soft px-2.5 py-1.5 text-[12px] leading-snug text-alert">
-              The checkpoint is waiting for your decision.
+            <p
+              className={`flex-1 rounded-md px-2.5 py-1.5 text-[12px] leading-snug ${
+                state === "AwaitingPomodoro"
+                  ? "bg-rest-soft text-rest-ink"
+                  : "bg-alert-soft text-alert"
+              }`}
+            >
+              {state === "AwaitingPomodoro"
+                ? "Break or keep going — the checkpoint is waiting."
+                : "The checkpoint is waiting for your decision."}
             </p>
           ) : onBreak ? (
             <>
@@ -147,6 +174,34 @@ export function Popover() {
             </div>
           </div>
         )}
+
+        {/* Pomodoro mode (issue #15). A quick toggle here as well as in
+            Settings, because the mode is meant to be flipped mid-day — "I need
+            to get through this one, no interruptions" — and a trip to the
+            settings window is friction enough that it would go unused.
+            Disabled at either checkpoint for the same reason the break control
+            is: switching the mode off must not become a way to dismiss its own
+            prompt (D33). */}
+        <div className="mt-2.5 flex items-center gap-2 border-t border-line pt-2.5">
+          <span className="text-[12.5px] text-ink-2">Pomodoro mode</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={pomodoroOn}
+            aria-label="Pomodoro mode"
+            disabled={atCheckpoint}
+            onClick={() => send({ kind: "setPomodoroMode", on: !pomodoroOn })}
+            className={`ml-auto flex h-[18px] w-[32px] flex-none items-center rounded-full border px-[2px] transition-colors ${
+              pomodoroOn ? "border-rest bg-rest" : "border-line-2 bg-surface-3"
+            } ${atCheckpoint ? "cursor-not-allowed opacity-40" : ""}`}
+          >
+            <span
+              className={`h-[12px] w-[12px] rounded-full bg-white shadow-sm transition-transform ${
+                pomodoroOn ? "translate-x-[14px]" : ""
+              }`}
+            />
+          </button>
+        </div>
       </section>
 
       {/* Today's tasks --------------------------------------------------- */}

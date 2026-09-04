@@ -35,6 +35,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "daily_tasks",
         sql: include_str!("migrations/005_daily_tasks.sql"),
     },
+    Migration {
+        version: 6,
+        name: "pomodoro_mode",
+        sql: include_str!("migrations/006_pomodoro_mode.sql"),
+    },
 ];
 
 pub fn run(conn: &mut Connection) -> crate::error::AppResult<()> {

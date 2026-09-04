@@ -2,7 +2,12 @@
 
 export type TaskStatus = "Todo" | "InProgress" | "Done" | "Cancelled";
 export type Priority = "Low" | "Medium" | "High";
-export type TimerState = "Idle" | "Running" | "Paused" | "AwaitingDecision";
+export type TimerState =
+  | "Idle" | "Running" | "Paused" | "AwaitingDecision"
+  /** The Pomodoro prompt is open (issue #15). A separate state from
+   *  `AwaitingDecision` because the two checkpoints accept different actions —
+   *  this one decides the break, never the task. */
+  | "AwaitingPomodoro";
 export type BlockKind = "Work" | "Break";
 export type BlockStatus =
   | "Planned" | "Running" | "Paused" | "AwaitingDecision"
@@ -129,6 +134,11 @@ export interface Snapshot {
   /** Ids of daily tasks already ticked off for today. Computed in Rust because
    *  local midnight is a shell concern and the UI does no date arithmetic. */
   doneToday: string[];
+  /** Pomodoro mode, or `null` when it is off (issue #15). `remainingMs` counts
+   *  down 25 minutes of *running work*, so it parks whenever the task timer
+   *  does. Interpolate it against `now` like the task countdown, and never
+   *  conclude it is due here — at zero, show zero and wait for the backend. */
+  pomodoro: { remainingMs: number } | null;
 }
 
 export interface HealthReport {
@@ -154,5 +164,8 @@ export type Action =
   | { kind: "addTask"; title: string; blockMs: number; priority: Priority; daily: boolean }
   | { kind: "editTask"; task: string; title: string; priority: Priority; daily: boolean }
   | { kind: "addTime"; task: string; ms: number }
+  | { kind: "decidePomodoroBreak"; ms: number }
+  | { kind: "decideSkipPomodoro" }
+  | { kind: "setPomodoroMode"; on: boolean }
   | { kind: "removeTask"; task: string }
   | { kind: "reorder"; moved: string; before: string };

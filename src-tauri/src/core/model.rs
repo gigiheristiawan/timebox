@@ -61,6 +61,11 @@ pub enum TimerState {
     Running,
     Paused,
     AwaitingDecision,
+    /// The Pomodoro prompt is open (POMODORO_MODE D30). A separate state from
+    /// `AwaitingDecision` because the two checkpoints accept different events:
+    /// `at_work_checkpoint` must be false here, or every `Decide*` guard would
+    /// fire on a prompt that decides nothing about the task (§4.5).
+    AwaitingPomodoro,
 }
 
 /// Why the timer was not running. Every in-window instant no block covered
@@ -84,7 +89,9 @@ impl IdleReason {
             TimerState::Running => None,
             TimerState::Idle => Some(IdleReason::Untracked),
             TimerState::Paused => Some(IdleReason::Paused),
-            TimerState::AwaitingDecision => Some(IdleReason::Awaiting),
+            TimerState::AwaitingDecision | TimerState::AwaitingPomodoro => {
+                Some(IdleReason::Awaiting)
+            }
         }
     }
 }
@@ -120,6 +127,25 @@ pub struct WorkSpan {
     pub started_at: Millis,
     /// `None` while the block is still running.
     pub ended_at: Option<Millis>,
+}
+
+/// Which checkpoint an effect refers to. Deliberately *not* a third `BlockKind`
+/// variant: the Pomodoro prompt creates no block, and `blocks.kind` can still
+/// only ever be written `WORK` or `BREAK` (POMODORO_MODE §4.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CheckpointKind {
+    Work,
+    Break,
+    Pomodoro,
+}
+
+impl From<BlockKind> for CheckpointKind {
+    fn from(k: BlockKind) -> Self {
+        match k {
+            BlockKind::Work => CheckpointKind::Work,
+            BlockKind::Break => CheckpointKind::Break,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,7 +306,7 @@ str_enum!(TaskStatus {
 str_enum!(Priority { Low => "LOW", Medium => "MEDIUM", High => "HIGH" });
 str_enum!(TimerState {
     Idle => "IDLE", Running => "RUNNING", Paused => "PAUSED",
-    AwaitingDecision => "AWAITING_DECISION",
+    AwaitingDecision => "AWAITING_DECISION", AwaitingPomodoro => "AWAITING_POMODORO",
 });
 str_enum!(BlockKind { Work => "WORK", Break => "BREAK" });
 str_enum!(IdleReason {
@@ -306,7 +332,8 @@ mod encoding_tests {
                   BlockStatus::Skipped, BlockStatus::Cancelled] {
             assert_eq!(BlockStatus::parse(v.as_str()), Some(v));
         }
-        for v in [TimerState::Idle, TimerState::Running, TimerState::Paused, TimerState::AwaitingDecision] {
+        for v in [TimerState::Idle, TimerState::Running, TimerState::Paused,
+                  TimerState::AwaitingDecision, TimerState::AwaitingPomodoro] {
             assert_eq!(TimerState::parse(v.as_str()), Some(v));
         }
         for v in [BlockKind::Work, BlockKind::Break] {
