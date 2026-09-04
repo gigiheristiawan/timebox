@@ -35,3 +35,14 @@ export function remainingMs(endAt: number, skew: number, now = Date.now()): numb
 }
 
 export const MIN = 60_000;
+
+/** "Mon", from an instant the backend supplied. Formatting, not arithmetic —
+ *  which day it *is* was decided in Rust (WEEKLY_REPORT D37). */
+export function weekdayStr(ms: number): string {
+  return new Date(ms).toLocaleDateString(undefined, { weekday: "short" });
+}
+
+/** "Sep 1". */
+export function dateStr(ms: number): string {
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}

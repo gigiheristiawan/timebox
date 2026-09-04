@@ -10,10 +10,12 @@ import { Capacity } from "./components/Capacity";
 import { Today } from "./components/Today";
 import { FirstRun } from "./components/FirstRun";
 import { QuickAdd } from "./components/QuickAdd";
+import { Report } from "./components/Report";
 
 export default function App() {
   const { error, init, send } = useTimebox();
   const [quickAdd, setQuickAdd] = useState(false);
+  const [tab, setTab] = useState<"focus" | "report">("focus");
 
   useEffect(() => {
     let un: (() => void) | undefined;
@@ -94,24 +96,58 @@ export default function App() {
       {error && <p className="rounded-lg bg-alert-soft px-4 py-3 text-sm text-alert">{error}</p>}
 
       <FirstRun />
+      {/* Above the switcher on purpose: the checkpoint has no exit, and a tab
+          is not one. */}
       <PendingDecision />
-      <CurrentPanel />
-      <RotationStrip />
 
-      <hr className="border-line" />
+      <Tabs tab={tab} onChange={setTab} />
 
-      <Queue />
-      <AddTask />
+      {tab === "focus" ? (
+        <>
+          <CurrentPanel />
+          <RotationStrip />
 
-      <hr className="border-line" />
+          <hr className="border-line" />
 
-      <Capacity />
+          <Queue />
+          <AddTask />
 
-      <hr className="border-line" />
+          <hr className="border-line" />
 
-      <Today />
+          <Capacity />
+
+          <hr className="border-line" />
+
+          <Today />
+        </>
+      ) : (
+        <Report />
+      )}
 
       <QuickAdd open={quickAdd} onClose={() => setQuickAdd(false)} />
     </main>
+  );
+}
+
+/**
+ * Focus / Report. A view switch, not a mode: the timer keeps running and every
+ * shortcut above still reaches it while the report is open (issue #6).
+ */
+function Tabs({ tab, onChange }: { tab: "focus" | "report"; onChange: (t: "focus" | "report") => void }) {
+  return (
+    <div className="flex gap-1 self-start rounded-[8px] bg-surface-3 p-[3px]">
+      {(["focus", "report"] as const).map((t) => (
+        <button
+          key={t}
+          type="button"
+          onClick={() => onChange(t)}
+          className={`rounded-[6px] px-3 py-1 text-[12px] font-medium capitalize transition-colors ${
+            tab === t ? "bg-surface text-ink" : "text-ink-2 hover:text-ink"
+          }`}
+        >
+          {t}
+        </button>
+      ))}
+    </div>
   );
 }

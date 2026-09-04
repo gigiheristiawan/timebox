@@ -1726,3 +1726,365 @@ mod pomodoro {
         assert_eq!(completed.current_block_id, at.current_block_id);
     }
 }
+
+mod report {
+    //! Tests 82–101 (issue #6). The weekly report is a pure function of state
+    //! plus the calendar, so every one of these runs without a database.
+
+    use super::*;
+    use crate::core::report::{report, DayCtx, WeekReport};
+    use crate::core::summary::summarize;
+
+    const HOUR: Millis = 60 * MIN;
+    const DAY_MS: Millis = 24 * HOUR;
+    const AVAILABLE: Millis = 4 * HOUR;
+
+    /// `h:m` on day `d` of the week (0 = Monday).
+    fn at(d: i64, h: i64, m: i64) -> Millis {
+        d * DAY_MS + h * HOUR + m * MIN
+    }
+
+    /// A Mon–Fri week: five days with a 09:00–18:00 window, then a weekend with
+    /// none. Day 0 begins at instant 0, so `at()` reads straight off it.
+    fn week(working: [bool; 7]) -> Vec<DayCtx> {
+        (0..7)
+            .map(|d| {
+                let day_start = d * DAY_MS;
+                DayCtx {
+                    day_start,
+                    day_end: day_start + DAY_MS,
+                    window: working[d as usize]
+                        .then_some((day_start + 9 * HOUR, day_start + 18 * HOUR)),
+                    available_ms: AVAILABLE,
+                }
+            })
+            .collect()
+    }
+
+    fn mon_fri() -> Vec<DayCtx> {
+        week([true, true, true, true, true, false, false])
+    }
+
+    fn rep(s: &MachineState, now: Millis) -> WeekReport {
+        report(s, &mon_fri(), 0, now)
+    }
+
+    /// A completed work block on `day`, from `from` to `to`, with its spans —
+    /// the shape `sync_work` writes. Used where driving the reducer would take
+    /// a dozen events to say one thing.
+    fn worked(s: &mut MachineState, id: &str, task: &str, from: Millis, to: Millis) {
+        s.blocks.push(TimeBlock {
+            id: id.into(),
+            kind: BlockKind::Work,
+            task_id: Some(task.into()),
+            planned_ms: to - from,
+            extension_ms: 0,
+            interruptions: 0,
+            actual_ms: Some(to - from),
+            status: BlockStatus::Completed,
+            started_at: Some(from),
+            ended_at: Some(to),
+            end_at: Some(to),
+            paused_at: None,
+            remaining_when_paused_ms: None,
+            accumulated_active_ms: to - from,
+            last_resume_at: None,
+            away_ms: 0,
+        });
+        s.work_spans.push(WorkSpan {
+            id: format!("{id}-s"),
+            block_id: id.into(),
+            started_at: from,
+            ended_at: Some(to),
+        });
+    }
+
+    #[test]
+    fn t82_a_day_in_the_report_is_the_day_summarize_already_defines() {
+        // Deliberately read on a day that is *past* at `now`: the bounds D44
+        // fixes are vacuous for today and only bite here.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(0, 10, 0), &mut ids);
+        let s = fire(s, Event::Pause, at(0, 10, 20), &mut ids);
+        let now = at(3, 12, 0);
+
+        let r = rep(&s, now);
+        for (i, row) in r.days.iter().enumerate() {
+            let start = i as i64 * DAY_MS;
+            let t = summarize(
+                &s,
+                start,
+                start + DAY_MS,
+                now,
+                AVAILABLE,
+                mon_fri()[i].window,
+            )
+            .today;
+            assert_eq!(row.worked_ms, t.worked_ms, "day {i} worked");
+            assert_eq!(row.break_ms, t.break_ms, "day {i} break");
+            assert_eq!(row.idle_ms, t.idle_ms, "day {i} idle");
+            assert_eq!(row.idle_awaiting_ms, t.idle_awaiting_ms, "day {i} awaiting");
+            assert_eq!(row.idle_paused_ms, t.idle_paused_ms, "day {i} paused");
+            assert_eq!(row.idle_untracked_ms, t.idle_untracked_ms, "day {i} untracked");
+            assert_eq!(row.outside_hours_ms, t.outside_hours_ms, "day {i} outside");
+            assert_eq!(row.tasks_completed, t.tasks_completed, "day {i} completed");
+            assert_eq!(row.blocks_completed, t.blocks_completed, "day {i} blocks");
+        }
+    }
+
+    #[test]
+    fn t83_a_block_across_midnight_splits_between_days_and_the_week_holds_both() {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(0, 23, 40), &mut ids);
+        let s = fire(s, Event::Tick, at(1, 0, 20), &mut ids);
+
+        let r = rep(&s, at(1, 0, 20));
+        assert_eq!(r.days[0].worked_ms, 20 * MIN);
+        assert_eq!(r.days[1].worked_ms, 20 * MIN);
+        assert_eq!(r.totals.worked_ms, 40 * MIN, "the week is the sum, neither losing nor duplicating");
+    }
+
+    #[test]
+    fn t84_a_blocks_switches_are_counted_once_not_once_per_day_it_touched() {
+        // One block, one switch, two days. Summing the days would say 2.
+        let mut s = MachineState::default();
+        s.tasks.push(Task::new("A", "A", 60 * MIN, 0));
+        worked(&mut s, "b1", "A", at(0, 23, 40), at(1, 0, 20));
+        s.blocks[0].interruptions = 1;
+
+        let r = rep(&s, at(1, 1, 0));
+        assert_eq!(r.totals.switched_early, 1, "churn is per block, not per day touched");
+    }
+
+    #[test]
+    fn t85_a_task_fourth_every_day_can_still_lead_the_week() {
+        // The week's ranking is not a merge of the daily rankings: D is beaten
+        // by three different tasks on each of two days, and outlasts all of
+        // them over the week.
+        let mut s = MachineState::default();
+        for id in ["A", "B", "C", "D", "E", "F", "G"] {
+            s.tasks.push(Task::new(id, id, 60 * MIN, 0));
+        }
+        for (d, trio) in [(0, ["A", "B", "C"]), (1, ["E", "F", "G"])] {
+            for (i, t) in trio.iter().enumerate() {
+                let from = at(d, 10 + i as i64, 0);
+                worked(&mut s, &format!("b{d}{i}"), t, from, from + 20 * MIN);
+            }
+            worked(&mut s, &format!("bd{d}"), "D", at(d, 14, 0), at(d, 14, 12));
+        }
+
+        let r = rep(&s, at(2, 9, 0));
+        assert_eq!(r.days[0].worked_ms, 72 * MIN);
+        assert_eq!(
+            r.top.first().map(|t| (t.task_id.as_str(), t.ms)),
+            Some(("D", 24 * MIN)),
+            "D is fourth on both days and first over the week"
+        );
+    }
+
+    #[test]
+    fn t86_a_non_working_day_has_a_zero_target_and_still_reports_its_work() {
+        let mut s = MachineState::default();
+        s.tasks.push(Task::new("A", "A", 60 * MIN, 0));
+        worked(&mut s, "b1", "A", at(5, 10, 0), at(5, 11, 0));
+
+        let r = rep(&s, at(6, 9, 0));
+        assert_eq!(r.totals.target_ms, 5 * AVAILABLE, "capacity × the five working weekdays");
+        assert_eq!(r.totals.working_days, 5);
+        assert_eq!(r.days[5].target_ms, 0, "Saturday is measured against zero, not exempt");
+        assert_eq!(r.days[5].worked_ms, HOUR, "and the work on it is still reported");
+    }
+
+    #[test]
+    fn t87_the_current_week_is_measured_against_the_whole_week() {
+        // Tuesday morning. The target is the week's, not two days of it (D36).
+        let s = MachineState::default();
+        let r = rep(&s, at(1, 9, 0));
+        assert_eq!(r.totals.target_ms, 5 * AVAILABLE);
+    }
+
+    #[test]
+    fn t88_a_week_with_nothing_in_it_is_seven_zero_rows_and_no_idle() {
+        let s = MachineState::default();
+        let r = rep(&s, at(6, 23, 0));
+        assert_eq!(r.days.len(), 7);
+        assert!(r.days.iter().all(|d| d.worked_ms == 0 && d.idle_ms == 0));
+        assert_eq!(r.totals.idle_ms, 0, "no blocks, no idle — a holiday is not a wasted window (D19)");
+        assert_eq!(r.totals.days_worked, 0);
+        assert!(r.top.is_empty());
+    }
+
+    #[test]
+    fn t89_the_week_is_seven_ascending_days_starting_monday() {
+        let s = MachineState::default();
+        let r = rep(&s, at(3, 9, 0));
+        assert_eq!(r.days.len(), 7);
+        assert_eq!(r.days[0].weekday, 0);
+        assert!(r.days.windows(2).all(|w| w[1].day_start > w[0].day_start));
+        assert_eq!(r.days.iter().map(|d| d.weekday).collect::<Vec<_>>(), (0..7).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn t94_the_three_idle_causes_partition_the_weeks_idle() {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(0, 10, 0), &mut ids);
+        let s = fire(s, Event::Pause, at(0, 10, 20), &mut ids);
+        let s = fire(s, Event::Resume, at(0, 11, 0), &mut ids);
+
+        let t = rep(&s, at(0, 12, 0)).totals;
+        assert_eq!(
+            t.idle_ms,
+            t.idle_awaiting_ms + t.idle_paused_ms + t.idle_untracked_ms,
+            "the causes must partition idle exactly, at the week level too (test 32)"
+        );
+        assert!(t.idle_paused_ms >= 40 * MIN, "the 40 m park is in there");
+    }
+
+    #[test]
+    fn t95_a_running_block_contributes_only_up_to_now_and_never_forward() {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(1, 10, 0), &mut ids);
+        let now = at(1, 10, 15);
+
+        let r = rep(&s, now);
+        assert_eq!(r.days[1].worked_ms, 15 * MIN);
+        assert!(
+            r.days[2..].iter().all(|d| d.worked_ms == 0 && d.idle_ms == 0),
+            "days that have not happened are empty, not full of idle"
+        );
+    }
+
+    #[test]
+    fn t96_a_daily_counts_only_on_its_last_tick_and_its_work_still_counts_daily() {
+        // `Task.completed_at` holds the *last* tick, and a daily has no history
+        // beyond it (D46). A standup done Mon, Tue and Wed therefore reports one
+        // completion for the week, on Wednesday — while the three blocks it took
+        // are all reported, on their own days. The work is recoverable; the
+        // repeated ticks are not.
+        let mut s = MachineState::default();
+        let mut t = Task::new("A", "Standup", 15 * MIN, 0);
+        t.daily = true;
+        s.tasks.push(t);
+        s.queue.push("A".into());
+        let mut ids = SeqIds::new("b");
+        for d in 0..3 {
+            s = fire_on(s, Event::SwitchTo { task: "A".into() }, at(d, 9, 0), d * DAY_MS, &mut ids);
+            s = fire_on(s, Event::CompleteCurrentTask, at(d, 9, 10), d * DAY_MS, &mut ids);
+        }
+
+        let r = rep(&s, at(3, 9, 0));
+        assert_eq!(r.totals.tasks_completed, 1, "one stored completion, not three");
+        assert_eq!(r.days[2].tasks_completed, 1, "and it is on the day it was last ticked");
+        assert_eq!(r.totals.blocks_completed, 3, "the work each day did is reported in full");
+        assert_eq!(r.totals.worked_ms, 30 * MIN);
+    }
+
+    #[test]
+    fn t97_a_span_less_block_from_after_the_week_lands_on_none_of_its_days() {
+        // Pre-migration-004 blocks carry no spans and fall back to `started_at`
+        // (D42). With only a lower bound on that test — which is what
+        // `summarize` had, sound for today and wrong for any earlier day — this
+        // block would be attributed to all seven days at once (D44).
+        let mut s = MachineState::default();
+        s.tasks.push(Task::new("A", "A", 60 * MIN, 0));
+        worked(&mut s, "b1", "A", at(9, 10, 0), at(9, 11, 0));
+        s.work_spans.clear();
+
+        let r = rep(&s, at(9, 12, 0));
+        assert!(r.days.iter().all(|d| d.worked_ms == 0), "it belongs to a later week, and to none of these days");
+        assert_eq!(r.totals.worked_ms, 0);
+    }
+
+    #[test]
+    fn t93_a_span_less_block_is_attributed_to_the_day_it_started() {
+        // D42: pre-migration-004 blocks have no spans and no way to recover
+        // their shape, so they keep the whole-block attribution `summarize`
+        // gives them rather than reading zero.
+        let mut s = MachineState::default();
+        s.tasks.push(Task::new("A", "A", 60 * MIN, 0));
+        worked(&mut s, "b1", "A", at(2, 22, 0), at(3, 1, 0));
+        s.work_spans.clear();
+
+        let now = at(4, 9, 0);
+        let r = rep(&s, now);
+        assert_eq!(r.days[2].worked_ms, 3 * HOUR, "the whole block, on the day it started");
+        assert_eq!(r.days[3].worked_ms, 0, "and not also on the day it ended");
+        assert_eq!(
+            r.days[2].worked_ms,
+            summarize(&s, 2 * DAY_MS, 3 * DAY_MS, now, AVAILABLE, mon_fri()[2].window).today.worked_ms,
+            "the report and the Today strip give old data the same answer"
+        );
+    }
+
+    #[test]
+    fn t98_a_completion_counts_on_its_own_day_only() {
+        let mut s = MachineState::default();
+        let mut t = Task::new("A", "A", 30 * MIN, 0);
+        t.status = TaskStatus::Done;
+        t.completed_at = Some(at(2, 15, 0));
+        s.tasks.push(t);
+
+        let r = rep(&s, at(4, 9, 0));
+        assert_eq!(r.days[2].tasks_completed, 1);
+        assert_eq!(
+            r.days.iter().map(|d| d.tasks_completed).sum::<usize>(),
+            1,
+            "Wednesday's completion is not also Monday's and Tuesday's (D44)"
+        );
+    }
+
+    #[test]
+    fn t99_churn_is_reported_in_the_week_the_block_finished_and_nowhere_else() {
+        // A block carried across a week boundary: `interruptions` is a lifetime
+        // counter with no per-switch timestamp, so the only attribution that
+        // can be made exactly once is the week it ended in (D35).
+        let mut s = MachineState::default();
+        s.tasks.push(Task::new("A", "A", 4 * HOUR, 0));
+        worked(&mut s, "b1", "A", at(-3, 10, 0), at(1, 11, 0));
+        s.blocks[0].interruptions = 3;
+
+        let now = at(3, 9, 0);
+        assert_eq!(report(&s, &mon_fri(), 0, now).totals.switched_early, 3, "the week it finished");
+        let prev: Vec<DayCtx> = mon_fri()
+            .iter()
+            .map(|c| DayCtx { day_start: c.day_start - 7 * DAY_MS, day_end: c.day_end - 7 * DAY_MS, ..*c })
+            .collect();
+        assert_eq!(report(&s, &prev, -1, now).totals.switched_early, 0, "and not the week it was carried through");
+
+        // Still parked: it has finished nowhere, so it is counted nowhere.
+        s.blocks[0].status = BlockStatus::Paused;
+        s.blocks[0].ended_at = None;
+        assert_eq!(report(&s, &mon_fri(), 0, now).totals.switched_early, 0);
+    }
+
+    #[test]
+    fn t100_a_saturday_reports_work_and_outside_hours_but_no_idle() {
+        // Driven through the reducer rather than hand-built: `outside_hours_ms`
+        // is a set difference against the idle spans, and only the reducer
+        // brackets those.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, at(5, 10, 0), &mut ids);
+        // Parked rather than completed: completing rotates to the next task,
+        // which would put a second Saturday block in the day.
+        let s = fire(s, Event::Pause, at(5, 10, 20), &mut ids);
+
+        let sat = &rep(&s, at(6, 9, 0)).days[5];
+        assert_eq!(sat.worked_ms, 20 * MIN);
+        assert_eq!(sat.idle_ms, 0, "outside the window no claim of presence was made (D17/D18)");
+        assert_eq!(sat.outside_hours_ms, 20 * MIN, "the work is still recorded, and named");
+        assert_eq!(sat.target_ms, 0);
+    }
+
+    #[test]
+    fn t101_changing_capacity_rescores_a_past_week() {
+        // Pinned as intended, not as a defect: settings are unversioned, so the
+        // report applies the present's expectations to the past's record (D45).
+        let s = MachineState::default();
+        let doubled: Vec<DayCtx> = mon_fri()
+            .iter()
+            .map(|c| DayCtx { available_ms: 2 * AVAILABLE, ..*c })
+            .collect();
+        assert_eq!(report(&s, &mon_fri(), -1, 0).totals.target_ms, 5 * AVAILABLE);
+        assert_eq!(report(&s, &doubled, -1, 0).totals.target_ms, 10 * AVAILABLE);
+    }
+}

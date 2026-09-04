@@ -90,12 +90,25 @@ fn spent_ms(b: &TimeBlock, now: Millis) -> Millis {
 /// Blocks written before `work_spans` existed carry no spans, and there is no
 /// way to recover their shape after the fact; those keep the old attribution so
 /// that past days read as they always did rather than dropping to zero.
-fn spent_in_day(spans: &SpansByBlock, b: &TimeBlock, day: Iv, now: Millis) -> Millis {
+///
+/// `day_end` is passed beside `day` because `day.1` is clipped at `now`, and the
+/// fallback needs the day's real upper edge. Bounding it at both ends is
+/// vacuous for today — nothing starts in the future — and load-bearing for any
+/// earlier day, which the weekly report asks about: with the lower bound alone
+/// a span-less block started this morning lands on *every* past day
+/// (WEEKLY_REPORT D44).
+fn spent_in_day(spans: &SpansByBlock, b: &TimeBlock, day: Iv, day_end: Millis, now: Millis) -> Millis {
     match spans.get(&b.id) {
         Some(ivs) => total(&intersect(ivs, &[day])).min(b.alloc_ms()),
-        None if b.started_at.is_some_and(|t| t >= day.0) => spent_ms(b, now),
+        None if started_in(b, day.0, day_end) => spent_ms(b, now),
         None => 0,
     }
+}
+
+/// The span-less fallback's day test, in one place because the block filter and
+/// `spent_in_day` must agree exactly (D44).
+fn started_in(b: &TimeBlock, day_start: Millis, day_end: Millis) -> bool {
+    b.started_at.is_some_and(|t| t >= day_start && t < day_end)
 }
 
 /// Total time this block has spent waiting for a decision: what has been banked
@@ -127,7 +140,7 @@ fn queued_ms(state: &MachineState, task: &TaskId) -> Millis {
 // block spans a gap — and it can go negative, which a duration cannot.
 
 /// A half-open wall-clock interval `[start, end)`.
-type Iv = (Millis, Millis);
+pub type Iv = (Millis, Millis);
 
 fn union(mut ivs: Vec<Iv>) -> Vec<Iv> {
     ivs.retain(|(a, b)| b > a);
@@ -256,17 +269,53 @@ fn break_intervals(spans: &SpansByBlock, today: &[&TimeBlock], now: Millis) -> V
     )
 }
 
-pub fn summarize(
+/// Everything one day contributes, computed in one place so that the Today
+/// strip and the weekly report cannot drift apart on what a day *is*
+/// (WEEKLY_REPORT D34). Issues #11 and #16 were each one subtle rule about the
+/// boundary; a second implementation of them would show up as two screens in
+/// the same app disagreeing about yesterday.
+///
+/// `by_task` is the whole map rather than the top three: a week's ranking is
+/// not a merge of daily rankings, and a task placed fourth every day can be
+/// second over the week (D35).
+pub struct DayFigures {
+    pub worked_ms: Millis,
+    pub break_ms: Millis,
+    pub away_ms: Millis,
+    pub idle_awaiting_ms: Millis,
+    pub idle_paused_ms: Millis,
+    pub idle_untracked_ms: Millis,
+    pub outside_hours_ms: Millis,
+    pub tasks_completed: usize,
+    pub blocks_completed: usize,
+    /// This day's blocks only. Not summable across days — see `core::report`,
+    /// which defines the week's churn over blocks that *ended* in it (D35).
+    pub switched_early: u32,
+    /// Descending by time; ties keep first-worked order, so the list is stable
+    /// between ticks rather than shuffling on every refresh.
+    pub by_task: Vec<(TaskId, Millis)>,
+}
+
+impl DayFigures {
+    pub fn idle_ms(&self) -> Millis {
+        self.idle_awaiting_ms + self.idle_paused_ms + self.idle_untracked_ms
+    }
+}
+
+/// The day beginning at `day_start`, as of `now`. `window` is the working
+/// window for that day — `None` on a non-working weekday, which is the whole of
+/// IDLE_TIME D18.
+pub fn day_figures(
     state: &MachineState,
     day_start: Millis,
     day_end: Millis,
     now: Millis,
-    available_ms: Millis,
     window: Option<Iv>,
-) -> Summary {
+) -> DayFigures {
     // Clipped at both ends: `now` is inside the day whenever the app asks about
     // today, but a block still running at the boundary must not spill the day
-    // it is being asked about into the next one (issue #11).
+    // it is being asked about into the next one (issue #11). For a day already
+    // past, the clamp yields the whole day; for one still to come, nothing.
     let day_iv: Iv = (day_start, now.clamp(day_start, day_end));
     let spans = spans_by_block(state, now);
     // What ran *during* the day, not what merely began in it (issue #11): a
@@ -277,37 +326,25 @@ pub fn summarize(
         .iter()
         .filter(|b| match spans.get(&b.id) {
             Some(ivs) => !intersect(ivs, &[day_iv]).is_empty(),
-            None => b.started_at.is_some_and(|t| t >= day_start),
+            None => started_in(b, day_start, day_end),
         })
         .collect();
 
     let awaiting = state.timer_state == TimerState::AwaitingDecision;
     let current = state.current_block_id.as_ref();
     let work = || today.iter().filter(|b| b.kind == BlockKind::Work);
+    let spent = |b: &TimeBlock| spent_in_day(&spans, b, day_iv, day_end, now);
 
     let mut by_task: Vec<(TaskId, Millis)> = Vec::new();
     for b in work() {
         let Some(t) = b.task_id.clone() else { continue };
-        let ms = spent_in_day(&spans, b, day_iv, now);
+        let ms = spent(b);
         match by_task.iter_mut().find(|(id, _)| id == &t) {
             Some(e) => e.1 += ms,
             None => by_task.push((t, ms)),
         }
     }
-    // Descending by time; ties keep first-worked order, so the list is stable
-    // between ticks rather than shuffling on every refresh.
     by_task.sort_by_key(|(_, ms)| std::cmp::Reverse(*ms));
-    let top = by_task
-        .into_iter()
-        .take(TOP_N)
-        .filter_map(|(id, ms)| {
-            state.tasks.iter().find(|t| t.id == id).map(|t| TopTask {
-                task_id: id,
-                title: t.title.clone(),
-                ms,
-            })
-        })
-        .collect();
 
     // D19: a day on which nothing was ever started produces no idle at all.
     // Without it every Saturday, holiday and sick day reads as a wasted window.
@@ -323,9 +360,6 @@ pub fn summarize(
         let ivs = &idle.iter().find(|(x, _)| *x == r).expect("all three reasons present").1;
         total(&intersect(ivs, &window_iv))
     };
-    let idle_awaiting_ms = idle_of(IdleReason::Awaiting);
-    let idle_paused_ms = idle_of(IdleReason::Paused);
-    let idle_untracked_ms = idle_of(IdleReason::Untracked);
 
     // D17/D18: work outside the window is recorded and reported; idle outside
     // it is not, because outside the window no claim of presence was made.
@@ -336,30 +370,78 @@ pub fn summarize(
         &subtract(&day, &union(window.into_iter().collect())),
     ));
 
-    let today_summary = Today {
-        worked_ms: work().map(|b| spent_in_day(&spans, b, day_iv, now)).sum(),
+    DayFigures {
+        worked_ms: work().map(|b| spent(b)).sum(),
         break_ms: today
             .iter()
             .filter(|b| b.kind == BlockKind::Break)
-            .map(|b| spent_in_day(&spans, b, day_iv, now))
+            .map(|b| spent(b))
             .sum(),
         away_ms: today.iter().map(|b| away_of(b, current, awaiting, now)).sum(),
-        idle_ms: idle_awaiting_ms + idle_paused_ms + idle_untracked_ms,
-        idle_awaiting_ms,
-        idle_paused_ms,
-        idle_untracked_ms,
+        idle_awaiting_ms: idle_of(IdleReason::Awaiting),
+        idle_paused_ms: idle_of(IdleReason::Paused),
+        idle_untracked_ms: idle_of(IdleReason::Untracked),
         outside_hours_ms,
         // A daily counts here exactly like any other completion (issue #16),
         // even though it stays `Todo` and stays in the queue — ticking one off
-        // is a thing you did today.
+        // is a thing you did today. Bounded above by `day_end` (D44): for today
+        // that is vacuous, for an earlier day it is what stops every later
+        // completion from being counted on it as well.
         tasks_completed: state
             .tasks
             .iter()
             .filter(|t| {
                 (t.status == TaskStatus::Done || t.daily)
-                    && t.completed_at.is_some_and(|c| c >= day_start)
+                    && t.completed_at.is_some_and(|c| c >= day_start && c < day_end)
             })
             .count(),
+        // Counted on the day the block *finished*, so one that ran across
+        // midnight is not counted twice (issue #11).
+        blocks_completed: work()
+            .filter(|b| b.status == BlockStatus::Completed)
+            .filter(|b| b.ended_at.is_some_and(|e| e >= day_start && e < day_end))
+            .count(),
+        switched_early: work().map(|b| b.interruptions).sum(),
+        by_task,
+    }
+}
+
+/// The `TOP_N` largest of a per-task map, resolved to titles. Shared by the day
+/// and the week so both name tasks the same way.
+pub fn top_tasks(state: &MachineState, by_task: Vec<(TaskId, Millis)>) -> Vec<TopTask> {
+    by_task
+        .into_iter()
+        .take(TOP_N)
+        .filter_map(|(id, ms)| {
+            state.tasks.iter().find(|t| t.id == id).map(|t| TopTask {
+                task_id: id,
+                title: t.title.clone(),
+                ms,
+            })
+        })
+        .collect()
+}
+
+pub fn summarize(
+    state: &MachineState,
+    day_start: Millis,
+    day_end: Millis,
+    now: Millis,
+    available_ms: Millis,
+    window: Option<Iv>,
+) -> Summary {
+    let d = day_figures(state, day_start, day_end, now, window);
+
+    let today_summary = Today {
+        worked_ms: d.worked_ms,
+        break_ms: d.break_ms,
+        away_ms: d.away_ms,
+        idle_ms: d.idle_ms(),
+        idle_awaiting_ms: d.idle_awaiting_ms,
+        idle_paused_ms: d.idle_paused_ms,
+        idle_untracked_ms: d.idle_untracked_ms,
+        outside_hours_ms: d.outside_hours_ms,
+        tasks_completed: d.tasks_completed,
         // …and correspondingly stops being outstanding until tomorrow, or it
         // would be counted in both columns at once.
         tasks_pending: state
@@ -370,14 +452,9 @@ pub fn summarize(
                     && !t.done_today(day_start)
             })
             .count(),
-        // Counted on the day the block *finished*, so one that ran across
-        // midnight is not counted twice (issue #11).
-        blocks_completed: work()
-            .filter(|b| b.status == BlockStatus::Completed)
-            .filter(|b| b.ended_at.is_some_and(|e| e >= day_start && e < day_end))
-            .count(),
-        switched_early: work().map(|b| b.interruptions).sum(),
-        top,
+        blocks_completed: d.blocks_completed,
+        switched_early: d.switched_early,
+        top: top_tasks(state, d.by_task),
     };
 
     let allocated_ms: Millis = state.queue.iter().map(|t| queued_ms(state, t)).sum();

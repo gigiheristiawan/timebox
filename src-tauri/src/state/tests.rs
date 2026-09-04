@@ -380,3 +380,61 @@ fn t76_a_pomodoro_checkpoint_reloads_as_a_pomodoro_checkpoint() {
         "and the task's remainder came back with it"
     );
 }
+
+/// Tests 90 and 91 (issue #6). Weeks are resolved here, not in the UI: "which
+/// Monday" needs a timezone, and stepping by weeks needs a calendar.
+#[test]
+fn t90_a_week_starts_on_local_monday_and_steps_by_calendar_weeks() {
+    use chrono::{Datelike, Local, TimeZone, Timelike, Weekday};
+    let ms = |y, m, d, h| {
+        chrono::NaiveDate::from_ymd_opt(y, m, d)
+            .and_then(|dt| dt.and_hms_opt(h, 0, 0))
+            .and_then(|dt| Local.from_local_datetime(&dt).earliest())
+            .unwrap()
+            .timestamp_millis()
+    };
+    let weekday_of = |t: Millis| Local.timestamp_millis_opt(t).single().unwrap().weekday();
+
+    // A Thursday. Its week starts on the Monday three days earlier.
+    let thursday = ms(2026, 8, 27, 15);
+    let start = week_start_ms(thursday, 0);
+    assert_eq!(weekday_of(start), Weekday::Mon);
+    assert_eq!(start, day_start_ms(ms(2026, 8, 24, 12)));
+    assert_eq!(week_start_ms(ms(2026, 8, 24, 0), 0), start, "Monday itself starts its own week");
+
+    // Stepping back is calendar arithmetic, not 7 × 86_400_000: across a DST
+    // transition the subtraction lands an hour off midnight and would move a
+    // block into the wrong week. Both sides of the US/EU autumn change.
+    for anchor in [ms(2026, 8, 27, 15), ms(2026, 11, 5, 15), ms(2026, 3, 12, 15)] {
+        for offset in [-1, -4, -52] {
+            let w = week_start_ms(anchor, offset);
+            assert_eq!(weekday_of(w), Weekday::Mon, "offset {offset} is still a Monday");
+            assert_eq!(
+                Local.timestamp_millis_opt(w).single().unwrap().hour(),
+                0,
+                "offset {offset} is still local midnight"
+            );
+        }
+    }
+}
+
+#[test]
+fn t91_consecutive_weeks_tile_with_no_gap_and_no_overlap() {
+    use crate::db::settings::Settings;
+    let now = day_start_ms(1_756_000_000_000) + 11 * 3_600_000;
+    let s = Settings::default();
+
+    for offset in [-3, -2, -1, 0] {
+        let days = week_context(week_start_ms(now, offset), &s);
+        assert_eq!(days.len(), 7);
+        assert_eq!(days[0].day_start, week_start_ms(now, offset));
+        for w in days.windows(2) {
+            assert_eq!(w[0].day_end, w[1].day_start, "the days tile");
+        }
+        assert_eq!(
+            days[6].day_end,
+            week_start_ms(now, offset + 1),
+            "and the week ends exactly where the next one begins"
+        );
+    }
+}

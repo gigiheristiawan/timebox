@@ -1,9 +1,10 @@
 use crate::core::model::{Millis, Priority};
+use crate::core::report::{report, WeekReport};
 use crate::core::summary::{summarize, Summary};
 use crate::core::timer_machine::{Event, MachineState};
 use crate::db::settings::Settings;
 use crate::error::AppResult;
-use crate::state::{day_start_ms, now_ms, window_for, App};
+use crate::state::{day_start_ms, now_ms, week_context, week_start_ms, window_for, App};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::State;
@@ -153,6 +154,33 @@ impl From<Action> for Event {
 #[tauri::command]
 pub fn get_snapshot(app: State<'_, Arc<App>>) -> AppResult<Snapshot> {
     Ok(snapshot_of(&app))
+}
+
+/// One week of already-recorded time (issue #6). `offset` is 0 for the week
+/// containing now, -1 for the week before.
+///
+/// Deliberately *not* on the snapshot: that is rebuilt every second by the tick
+/// loop, and folding a week of interval algebra into it would recompute seven
+/// days of spans once a second for a tab that is usually closed
+/// (WEEKLY_REPORT D38). This is a read — it emits no `timebox://changed`, and
+/// holds the machine lock only for the clone `snapshot()` makes.
+#[tauri::command]
+pub fn get_report(app: State<'_, Arc<App>>, offset: i32) -> AppResult<WeekReport> {
+    if offset > 0 {
+        // The app makes no claim about a week that has not happened (D41).
+        return Err(crate::error::AppError::Rejected(
+            "no report for a future week".into(),
+        ));
+    }
+    let now = now_ms();
+    let settings = app.settings();
+    let week_start = week_start_ms(now, offset);
+    Ok(report(
+        &app.snapshot(),
+        &week_context(week_start, &settings),
+        offset,
+        now,
+    ))
 }
 
 /// Returns the resulting snapshot so the UI updates from the backend's own
