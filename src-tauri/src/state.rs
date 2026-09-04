@@ -4,6 +4,7 @@
 //! Nothing here re-implements a rule.
 
 use crate::core::model::*;
+use crate::core::report::DayCtx;
 use crate::core::timer_machine::{reduce, Effect, Event, MachineState};
 use crate::db::settings::Settings;
 use crate::db::{repo, settings, Db};
@@ -41,6 +42,57 @@ pub fn day_start_ms(now: Millis) -> Millis {
 /// day boundary is a wall-clock fact, like the working window below.
 pub fn day_end_ms(day_start: Millis) -> Millis {
     day_start_ms(day_start + 36 * 3_600_000)
+}
+
+/// Local midnight of the Monday of `now`'s week, stepped `offset` weeks
+/// (0 = this week, -1 = last week).
+///
+/// Stepped as *calendar* days on the local date, not `± 7 × 86_400_000`: a week
+/// containing a DST transition is 167 or 169 hours long, and the arithmetic
+/// would land an hour off midnight and quietly move a block between weeks.
+///
+/// The UI never computes this — it asks for a week by offset and formats the
+/// instants that come back (WEEKLY_REPORT D37), the same rule that keeps
+/// `doneToday` on the wire as ids.
+pub fn week_start_ms(now: Millis, offset: i32) -> Millis {
+    use chrono::{Datelike, Duration, Local, TimeZone};
+
+    let today = match Local.timestamp_millis_opt(now).single() {
+        Some(dt) => dt.date_naive(),
+        None => return day_start_ms(now),
+    };
+    let monday = today - Duration::days(today.weekday().num_days_from_monday() as i64)
+        + Duration::days(offset as i64 * 7);
+    monday
+        .and_hms_opt(0, 0, 0)
+        .and_then(|m| Local.from_local_datetime(&m).earliest())
+        .map(|dt| dt.timestamp_millis())
+        // Same fallback as `day_start_ms`: a nonexistent local midnight must
+        // not empty the week.
+        .unwrap_or_else(|| {
+            let days = offset as Millis * 7 - today.weekday().num_days_from_monday() as Millis;
+            day_start_ms(now + days * 86_400_000)
+        })
+}
+
+/// The seven `DayCtx` of the week beginning at `week_start`, Monday first.
+///
+/// Each day resolves its own end and window, so a DST day is 23 or 25 hours and
+/// its window still starts at 09:00 by the clock on the wall.
+pub fn week_context(week_start: Millis, s: &Settings) -> Vec<DayCtx> {
+    let mut out = Vec::with_capacity(7);
+    let mut day_start = week_start;
+    for _ in 0..7 {
+        let day_end = day_end_ms(day_start);
+        out.push(DayCtx {
+            day_start,
+            day_end,
+            window: window_for(day_start, s),
+            available_ms: s.available_work_ms_per_day,
+        });
+        day_start = day_end;
+    }
+    out
 }
 
 /// The working window on the day beginning at `day_start`, as a pair of

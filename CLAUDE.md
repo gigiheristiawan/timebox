@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Date (WIB)       | Change                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-09-04 23:07 | **Weekly report (issue #6).** A read-only *Report* tab beside *Focus* in the main window: seven day rows, week totals against `capacity × working weekdays`, top tasks, and the idle causes. `core/report.rs` is a pure function of `MachineState` — **no migration, no event, no column** — fed seven `DayCtx` by `state::week_context`, with `state::week_start_ms(now, offset)` resolving the Monday by *calendar* days so a DST week stays on midnight. The UI asks by **offset**, never by date, and `get_report` is its own command rather than a field on `Snapshot`, which is rebuilt once a second. `summary::summarize` now delegates to a shared **`day_figures`**, so the Today strip and the report cannot disagree about yesterday; that refactor exposed **two latent bugs** — `spent_in_day`'s span-less fallback and `tasks_completed` were bounded *below only*, sound for today and wrong for any earlier day (a span-less block would land on all seven days, a completion on every day before it). Three figures are **not** week-shaped: `switched_early` is counted over blocks that *ended* in the week, `away_ms` is dropped for `idle_awaiting_ms`, and a daily's repeated ticks are unrecoverable (one `completed_at`). `docs/features/WEEKLY_REPORT.md`, D34–D46, tests 82–101. |
 | 2026-09-04 21:53 | **Pomodoro mode (issue #15).** A *second* timer beside the task timer, not a change to block allocation: `MachineState.pomodoro_since` is the instant the current pomodoro accrues from, and elapsed is **derived** as `work_spans ∩ [since, now]` — so a pause parks it with no code and a quit needs no recovery path, the same argument that made "done today" derived. It counts only `RUNNING` `WORK` time; any break *ending* resets it, expiry does not. At 25 min the block is **parked** (never `expire`d — that discards the remainder) and a fourth **`TimerState::AwaitingPomodoro`** opens a prompt with two doors, *Take a break* / *Skip & continue*, deciding the break and never the task. The task checkpoint wins a tie and the prompt is dropped, not queued. The fourth state is load-bearing: `at_work_checkpoint` is `AwaitingDecision && !on_break()`, which a Pomodoro prompt also satisfied, so every `Decide*` guard would have fired on it. New **`at_any_checkpoint`** replaces the four positive tests and two accidents that used to enforce "the checkpoint has no exit" — `switch_to` (a positive test used as a *refusal*), `StartBreak` (a negation used as *permission*), `Skip` and `CompleteCurrentTask` (no guard at all) were all open. Migration **006 rebuilds `app_state`**: 001's `CHECK` on `timer_state` cannot be altered in place, and without the rebuild every write during the prompt fails at runtime. `docs/features/POMODORO_MODE/SPEC.md`, D27–D33, tests 62–81. |
 | 2026-09-04 10:55 | **Daily tasks (issue #16).** `Task` gains `daily: bool`; a daily is never `Done` and never leaves the queue, and "done today" is *derived* — `Task::done_today(day_start)` reads `completed_at >= day_start` — so there is no midnight reset to fire and nothing to miss when the app is closed over the day boundary. `reduce` therefore takes **`day_start` beside `now`** (`state::day_start_ms`), the same injection `core::summary` already gets. `start_next` picks the first *startable* task rather than the queue head, `switch_to` refuses a daily done today, and `finish_task` discards its parked block so tomorrow starts on a fresh allocation. Migration **005** adds `tasks.daily`. `Snapshot.doneToday` carries the ids so the UI does no date arithmetic. `docs/features/DAILY_TASKS.md`, D23–D26, tests 54–61. |
 | 2026-08-28 15:24 | **Rule 18 added** — an issue is worked on its own branch, `bugs/<n>-<slug>` or `feature/<n>-<slug>`, never on `main`, and the hand-over order is commit → Gigih pushes → PR with `Closes #<n>`. Written down after issues #10 and #11 each needed the branch name and the pause before pushing asked for by hand. |
@@ -267,17 +268,21 @@ This is the single most important structural rule (`docs/SPEC.md` R6/R7).
 ```
 core/           pure reducer + queue ops + model + menubar/summary  (no I/O)
                 summary.rs also owns the interval algebra idle and worked are
-                both defined on
+                both defined on, and `day_figures` — the one definition of a
+                day, which report.rs calls rather than re-deriving
+                report.rs is the weekly report (issue #6): seven days plus the
+                week's totals, from state and an injected calendar
 db/             rusqlite; repo.rs snapshots whole state in one transaction;
                 settings.rs reads/writes the single settings row
 state.rs        App: hydrate, dispatch, the tick thread, cached settings;
-                day_start_ms, day_end_ms and window_for — the calendar answers
-                the core is handed rather than allowed to compute
+                day_start_ms, day_end_ms, window_for, week_start_ms and
+                week_context — the calendar answers the core is handed rather
+                than allowed to compute
 platform/       checkpoint, popover, tray windows;
                 login_item (SMAppService) and window_corners (rounded popover),
                 both raw AppKit via objc2 — see the App Store note below
-commands.rs     the entire IPC surface: get_snapshot, dispatch, update_settings,
-                window plumbing, health_check
+commands.rs     the entire IPC surface: get_snapshot, get_report, dispatch,
+                update_settings, window plumbing, health_check
 ```
 
 `Snapshot` carries `state`, `summary` (Today + capacity + idle, from
@@ -312,6 +317,11 @@ Each is enforced and tested; changing one changes what the product is.
 - **At most one parked block per task**, enforced both in the reducer and by a partial unique index in the schema.
 - **The checkpoint has no exit.** No dismiss/close/later/continue, no timeout, `Esc` inert, `Cmd+W` refused, and `SwitchTo`/`Pause`/`Resume`/`StartBreak` are no-ops while a work checkpoint is open.
 - **`end_at` is absolute and never decremented** *while a block runs*. It is recomputed on every resume, and **quitting parks the block** — the exit path dispatches `Event::Pause`, so the interval the app is closed is idle, not work (IDLE_TIME D16, reversing SPEC §6). The anti-gaming rule is untouched: parking holds the *remainder* and never re-grants an allocation. Recorded work is still capped at the block's allocation, which is what bounds the one gap left — a crash or a sleep mid-block, until D21 lands.
+- **Every day filter is bounded at both ends.** `summarize` is only ever asked
+  about today, so testing `>= day_start` alone was sound there — and wrong for
+  every earlier day, which the weekly report asks about. A span-less (pre-004)
+  block would be attributed to *every* past day, and a task completed on
+  Wednesday counted on Monday and Tuesday as well (WEEKLY_REPORT D44).
 - **A day's worked time is `work_spans ∩ day`, not a block's total.** A block
   is not an interval: it can be parked overnight and extended for days, so
   `started_at`-bucketing reported nothing for the day actually spent on it
@@ -335,7 +345,7 @@ Each is enforced and tested; changing one changes what the product is.
 ## Docs
 
 - **`docs/SPEC.md`** is authoritative for the MVP. Numbered decisions `D1`–`D14` (resolved ambiguities, each with its reasoning), stack rationale `R1`–`R8` (labelled _Inherited_ vs _Chosen_), and acceptance tests 1–22. If code and spec disagree, fix one deliberately and say which. D14 is struck — see D16.
-- **`docs/features/`** holds the specs that extend it, each with its own decisions and acceptance tests continuing the same numbering: `IDLE_TIME.md` (D15–D20, D22; tests 23–33, 42–47) with `IDLE_TIME_PLAN.md` beside it, `DAILY_TASKS.md` (D23–D26; tests 54–61), and `SLEEP_DETECTION.md` (D21; tests 34–41, **not yet implemented**).
+- **`docs/features/`** holds the specs that extend it, each with its own decisions and acceptance tests continuing the same numbering: `IDLE_TIME.md` (D15–D20, D22; tests 23–33, 42–47) with `IDLE_TIME_PLAN.md` beside it, `DAILY_TASKS.md` (D23–D26; tests 54–61), `WEEKLY_REPORT.md` (D34–D46; tests 82–101), and `SLEEP_DETECTION.md` (D21; tests 34–41, **not yet implemented**).
 - **`docs/IMPLEMENTATION_PLAN.md`** tracks per-task status across 8 phases plus open questions. Update it as work lands.
 - **`docs/RELEASE.md`** is the release runbook — icon regeneration, universal build, signing, notarization, and the performance check, with the exact commands.
 - **`docs/mockup.html`** is the interactive design reference — the real product logic in a single HTML file. Useful for checking intended interaction before building a component.

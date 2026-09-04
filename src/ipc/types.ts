@@ -121,6 +121,62 @@ export interface Summary {
   capacity: Capacity;
 }
 
+/** The weekly report (issue #6), from `core::report`. Fetched by its own
+ *  command rather than carried on the snapshot: the snapshot is rebuilt every
+ *  second, and a week of interval algebra does not belong there (D38). */
+export interface DayReport {
+  dayStart: number;
+  /** 0 = Monday … 6 = Sunday. */
+  weekday: number;
+  /** A label only — the day is scored either way. */
+  workingDay: boolean;
+  /** Capacity on a working day, 0 otherwise. A real zero, not an absent
+   *  target: work on a day off is over target (D36). */
+  targetMs: number;
+  workedMs: number;
+  breakMs: number;
+  idleMs: number;
+  idleAwaitingMs: number;
+  idlePausedMs: number;
+  idleUntrackedMs: number;
+  outsideHoursMs: number;
+  tasksCompleted: number;
+  blocksCompleted: number;
+}
+
+export interface WeekTotals {
+  workedMs: number;
+  breakMs: number;
+  idleMs: number;
+  idleAwaitingMs: number;
+  idlePausedMs: number;
+  idleUntrackedMs: number;
+  outsideHoursMs: number;
+  tasksCompleted: number;
+  blocksCompleted: number;
+  /** Over the blocks that *ended* in the week — not the sum of the days
+   *  (D35). There is deliberately no per-day equivalent. */
+  switchedEarly: number;
+  /** Capacity × working weekdays. The whole week's, even mid-week (D36). */
+  targetMs: number;
+  workingDays: number;
+  daysWorked: number;
+}
+
+export interface WeekReport {
+  weekStart: number;
+  /** Exclusive: the following Monday. */
+  weekEnd: number;
+  /** 0 = current week, -1 = last week. Never positive. */
+  offset: number;
+  isCurrentWeek: boolean;
+  /** Always seven, Monday first, zeros included (D39). */
+  days: DayReport[];
+  /** Ranked over the week, not merged from the daily rankings (D35). */
+  top: TopTask[];
+  totals: WeekTotals;
+}
+
 export interface Snapshot {
   state: MachineState;
   now: number;

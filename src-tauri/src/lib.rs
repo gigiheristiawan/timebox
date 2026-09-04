@@ -96,6 +96,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::get_snapshot,
+            commands::get_report,
             commands::dispatch,
             commands::update_settings,
             commands::open_main_window,
