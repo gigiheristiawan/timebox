@@ -316,3 +316,67 @@ fn t61_a_daily_task_and_its_last_completion_survive_a_restart() {
     let b = back.tasks.iter().find(|t| t.id == "B").unwrap();
     assert!(!b.daily);
 }
+
+/// Build a state by feeding events through the reducer, the way the core tests
+/// do — `App` owns its `Db`, so a test that also needs the handle afterwards
+/// cannot go through `App`.
+fn drive(events: &[(Event, Millis)]) -> MachineState {
+    let mut s = seeded();
+    let mut ids = SeqIds::new("p");
+    for (e, at) in events {
+        s = crate::core::timer_machine::reduce(s, e.clone(), *at, 0, &mut ids).0;
+    }
+    s
+}
+
+/// Test 71 — the pomodoro survives a quit, and the interval the app was closed
+/// does not count toward it. Work is *observed* through `work_spans`, and no
+/// span accrues while the process is dead, so this needs no recovery path of
+/// its own — which is the whole reason the clock is derived rather than
+/// accumulated (POMODORO_MODE §3.1, §4.2).
+#[test]
+fn t71_a_pomodoro_survives_a_quit_and_the_closed_interval_does_not_count() {
+    // Twenty minutes of work, then the quit path: D16 parks the block.
+    let before = drive(&[
+        (Event::SetPomodoroMode { on: true }, 0),
+        (Event::SwitchTo { task: "A".into() }, 0),
+        (Event::Pause, 20 * MIN),
+    ]);
+    assert_eq!(before.pomodoro_elapsed_ms(20 * MIN), Some(20 * MIN));
+
+    // Away for a day.
+    let relaunch = 24 * 60 * MIN;
+    let (_db, back) = quit_and_relaunch(Db::in_memory().unwrap(), &before, 20 * MIN, relaunch);
+
+    assert!(back.pomodoro_since.is_some(), "the mode is still on");
+    assert_eq!(
+        back.pomodoro_elapsed_ms(relaunch),
+        Some(20 * MIN),
+        "the day the app was closed is not work"
+    );
+    assert_ne!(back.timer_state, TimerState::AwaitingPomodoro, "and no prompt fires on launch");
+}
+
+/// Test 76 — `AWAITING_POMODORO` round-trips, and a state persisted in it comes
+/// back as a *Pomodoro* checkpoint rather than a work one. This is the reason
+/// the kind is a `TimerState` variant and not a field on the effect: effects
+/// are transient, and after a relaunch nothing else would say which window had
+/// been open (POMODORO_MODE §4.5).
+#[test]
+fn t76_a_pomodoro_checkpoint_reloads_as_a_pomodoro_checkpoint() {
+    let before = drive(&[
+        (Event::SetPomodoroMode { on: true }, 0),
+        (Event::SwitchTo { task: "A".into() }, 0),
+        (Event::Tick, 25 * MIN),
+    ]);
+    assert_eq!(before.timer_state, TimerState::AwaitingPomodoro);
+
+    let (_db, back) = quit_and_relaunch(Db::in_memory().unwrap(), &before, 25 * MIN, 26 * MIN);
+
+    assert_eq!(back.timer_state, TimerState::AwaitingPomodoro, "not AwaitingDecision");
+    assert_eq!(
+        back.current_block().unwrap().remaining_when_paused_ms,
+        Some(5 * MIN),
+        "and the task's remainder came back with it"
+    );
+}

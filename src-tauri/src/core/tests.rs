@@ -1422,3 +1422,307 @@ mod daily {
         assert_eq!(today(&s, 0, 12 * MIN).tasks_pending, 4, "it is outstanding again");
     }
 }
+
+/// Pomodoro mode — `docs/features/POMODORO_MODE/SPEC.md`, tests 62–81.
+///
+/// The two clocks are independent, so most of these assert what the task timer
+/// did *not* do while the pomodoro fired.
+mod pomodoro {
+    use super::*;
+
+    /// Turn the mode on and start A (allocated 30m in `day()`).
+    fn running_with_pomodoro() -> (MachineState, SeqIds) {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SetPomodoroMode { on: true }, 0, &mut ids);
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        (s, ids)
+    }
+
+    /// Test 62 — the premise. Twenty-five minutes of work opens the Pomodoro
+    /// prompt, and the task's own 30m block is untouched underneath it.
+    #[test]
+    fn t62_twenty_five_minutes_of_work_opens_the_pomodoro_prompt() {
+        let (s, mut ids) = running_with_pomodoro();
+        let (s, fx) = fire_fx(s, Event::Tick, 25 * MIN, &mut ids);
+
+        assert_eq!(s.timer_state, TimerState::AwaitingPomodoro);
+        assert!(fx.iter().any(|e| matches!(
+            e,
+            Effect::EnterCheckpoint { kind: CheckpointKind::Pomodoro, .. }
+        )));
+        // Still A's block, still holding the 5m the task has left.
+        let b = s.current_block().unwrap();
+        assert_eq!(b.task_id.as_deref(), Some("A"));
+        assert_eq!(b.remaining_when_paused_ms, Some(5 * MIN));
+        assert_eq!(status_of(&s, "A"), TaskStatus::InProgress);
+    }
+
+    /// Test 63 — with the mode off the same work opens nothing. Without this
+    /// the feature would be unconditional rather than a toggle.
+    #[test]
+    fn t63_mode_off_opens_nothing() {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        let s = fire(s, Event::Tick, 25 * MIN, &mut ids);
+        assert_eq!(s.timer_state, TimerState::Running);
+    }
+
+    /// Test 64 — skipping resumes the task's full remainder and buys a whole
+    /// fresh 25, rather than re-prompting sooner (D29).
+    #[test]
+    fn t64_skip_resumes_the_task_and_buys_a_fresh_twenty_five() {
+        let (s, mut ids) = running_with_pomodoro();
+        let s = fire(s, Event::Tick, 25 * MIN, &mut ids);
+        let s = fire(s, Event::DecideSkipPomodoro, 25 * MIN, &mut ids);
+
+        assert_eq!(s.timer_state, TimerState::Running);
+        assert_eq!(s.remaining_ms(25 * MIN), 5 * MIN);
+        assert_eq!(s.pomodoro_elapsed_ms(25 * MIN), Some(0));
+        // 24 minutes later it is still not due; a minute after that it is.
+        assert_eq!(s.pomodoro_remaining_ms(49 * MIN), Some(MIN));
+    }
+
+    /// Test 65 — taking the break parks the work block, and returning resumes
+    /// the *remainder*. SPEC D10 is not weakened by this feature.
+    #[test]
+    fn t65_break_parks_the_block_and_returns_to_the_remainder() {
+        let (s, mut ids) = running_with_pomodoro();
+        let s = fire(s, Event::Tick, 25 * MIN, &mut ids);
+        let s = fire(s, Event::DecidePomodoroBreak { ms: 5 * MIN }, 25 * MIN, &mut ids);
+
+        assert!(s.on_break());
+        assert_eq!(s.timer_state, TimerState::Running);
+
+        let s = fire(s, Event::EndBreak, 30 * MIN, &mut ids);
+        assert_eq!(s.current_task().map(|t| t.id.clone()), Some("A".into()));
+        assert_eq!(s.remaining_ms(30 * MIN), 5 * MIN, "the 5m A had left, not a fresh 30");
+    }
+
+    /// Test 66 — the clock parks across a pause rather than being wiped by it.
+    /// Wiping would punish correct use of the pause button (D29).
+    #[test]
+    fn t66_a_pause_parks_the_clock_rather_than_resetting_it() {
+        let (s, mut ids) = running_with_pomodoro();
+        let s = fire(s, Event::Pause, 20 * MIN, &mut ids);
+        let s = fire(s, Event::Resume, 80 * MIN, &mut ids);
+
+        assert_eq!(s.pomodoro_elapsed_ms(80 * MIN), Some(20 * MIN), "the hour paused is not work");
+        // Five more minutes of work, not twenty-five.
+        let s = fire(s, Event::Tick, 85 * MIN, &mut ids);
+        assert_eq!(s.timer_state, TimerState::AwaitingPomodoro);
+    }
+
+    /// Test 67 — a break taken from a *task* checkpoint resets the clock too.
+    /// A break is rest whatever door it came through (D29).
+    #[test]
+    fn t67_a_break_from_the_task_checkpoint_resets_the_clock() {
+        let (s, mut ids) = running_with_pomodoro();
+        // A's 30m block expires first, at 30m — before any pomodoro is due,
+        // because 25m of work put us at the prompt; skip it to keep working.
+        let s = fire(s, Event::Tick, 25 * MIN, &mut ids);
+        let s = fire(s, Event::DecideSkipPomodoro, 25 * MIN, &mut ids);
+        let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+        assert_eq!(s.timer_state, TimerState::AwaitingDecision, "the task block expired");
+
+        let s = fire(s, Event::DecideBreak { ms: 10 * MIN, complete: false }, 30 * MIN, &mut ids);
+        let s = fire(s, Event::EndBreak, 40 * MIN, &mut ids);
+        assert_eq!(s.pomodoro_elapsed_ms(40 * MIN), Some(0), "the break reset it");
+    }
+
+    /// Test 68 — both due at once shows the task checkpoint alone. Two blocking
+    /// windows for one moment is the interruption the mode exists to bound.
+    #[test]
+    fn t68_task_checkpoint_wins_a_tie() {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SetPomodoroMode { on: true }, 0, &mut ids);
+        // C is allocated 25m — exactly the pomodoro interval, so both are due.
+        let s = fire(s, Event::SwitchTo { task: "C".into() }, 0, &mut ids);
+        let s = {
+            let mut s = s;
+            let id = s.current_block_id.clone().unwrap();
+            let b = s.blocks.iter_mut().find(|b| b.id == id).unwrap();
+            b.planned_ms = 25 * MIN;
+            b.end_at = Some(25 * MIN);
+            s
+        };
+        let (s, fx) = fire_fx(s, Event::Tick, 25 * MIN, &mut ids);
+
+        assert_eq!(s.timer_state, TimerState::AwaitingDecision, "not AwaitingPomodoro");
+        assert_eq!(
+            fx.iter()
+                .filter(|e| matches!(e, Effect::EnterCheckpoint { .. }))
+                .count(),
+            1,
+            "one window, not one queued behind the other"
+        );
+    }
+
+    /// Test 69 — the Pomodoro checkpoint has no exit. Each of these would
+    /// otherwise decide the task the prompt is supposed to leave alone.
+    #[test]
+    fn t69_the_pomodoro_checkpoint_has_no_exit() {
+        let (s, mut ids) = running_with_pomodoro();
+        let at = fire(s, Event::Tick, 25 * MIN, &mut ids);
+
+        for e in [
+            Event::SwitchTo { task: "B".into() },
+            Event::Pause,
+            Event::Resume,
+            Event::StartBreak { ms: 5 * MIN },
+            Event::CompleteCurrentTask,
+            Event::Skip,
+            Event::SetPomodoroMode { on: false },
+        ] {
+            let label = format!("{e:?}");
+            let after = fire(at.clone(), e, 26 * MIN, &mut ids);
+            assert_eq!(after.timer_state, TimerState::AwaitingPomodoro, "{label} escaped");
+            assert_eq!(after.current_block_id, at.current_block_id, "{label} moved the block");
+            assert_eq!(after.queue, at.queue, "{label} moved the queue");
+            assert!(after.pomodoro_since.is_some(), "{label} switched the mode off");
+        }
+    }
+
+    /// Test 70 — switching the mode on mid-block starts a fresh 25, so the
+    /// toggle can never fire a prompt the instant it is flipped (D33).
+    #[test]
+    fn t70_toggling_on_mid_block_starts_a_fresh_twenty_five() {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "B".into() }, 0, &mut ids);
+        let s = fire(s, Event::SetPomodoroMode { on: true }, 12 * MIN, &mut ids);
+
+        assert_eq!(s.pomodoro_elapsed_ms(12 * MIN), Some(0), "the 12m already worked is not credited");
+        let s = fire(s, Event::Tick, 36 * MIN, &mut ids);
+        assert_eq!(s.timer_state, TimerState::Running, "13m later is not 25m later");
+        let s = fire(s, Event::Tick, 37 * MIN, &mut ids);
+        assert_eq!(s.timer_state, TimerState::AwaitingPomodoro);
+    }
+
+    /// Test 72 — off then on again discards the accumulated work.
+    #[test]
+    fn t72_off_then_on_again_discards_the_accumulated_work() {
+        let (s, mut ids) = running_with_pomodoro();
+        let s = fire(s, Event::SetPomodoroMode { on: false }, 20 * MIN, &mut ids);
+        assert_eq!(s.pomodoro_elapsed_ms(20 * MIN), None);
+        let s = fire(s, Event::SetPomodoroMode { on: true }, 20 * MIN, &mut ids);
+        assert_eq!(s.pomodoro_elapsed_ms(20 * MIN), Some(0));
+    }
+
+    /// Test 73 — ignoring the prompt costs the task nothing. `away_ms` stays 0
+    /// *because* the park preserved the remainder; banking it as well would
+    /// charge the wait twice.
+    #[test]
+    fn t73_ignoring_the_prompt_costs_the_task_nothing() {
+        let (s, mut ids) = running_with_pomodoro();
+        let s = fire(s, Event::Tick, 25 * MIN, &mut ids);
+        let hour_later = 85 * MIN;
+        let s = fire(s, Event::Tick, hour_later, &mut ids);
+
+        assert_eq!(s.timer_state, TimerState::AwaitingPomodoro, "still waiting");
+        let b = s.current_block().unwrap();
+        assert_eq!(b.away_ms, 0, "the park holds the remainder; nothing to bank");
+        assert_eq!(b.remaining_when_paused_ms, Some(5 * MIN));
+        assert_eq!(s.pomodoro_elapsed_ms(hour_later), Some(25 * MIN), "the clock parked too");
+        assert_eq!(s.staleness_ms(hour_later), Some(60 * MIN), "but the wait is visible");
+        assert_eq!(s.open_idle.as_ref().map(|i| i.reason), Some(IdleReason::Awaiting));
+
+        // Answering acts from now: a full break, and A's 5m still intact.
+        let s = fire(s, Event::DecidePomodoroBreak { ms: 5 * MIN }, hour_later, &mut ids);
+        assert_eq!(s.remaining_ms(hour_later), 5 * MIN, "the break is full length");
+        let s = fire(s, Event::EndBreak, hour_later + 5 * MIN, &mut ids);
+        assert_eq!(s.remaining_ms(hour_later + 5 * MIN), 5 * MIN, "A's remainder");
+    }
+
+    /// Test 74 — the four `Decide*` events belong to the *work* checkpoint.
+    /// Before `AwaitingPomodoro` existed they all passed `at_work_checkpoint`
+    /// here and silently completed or rotated the task.
+    #[test]
+    fn t74_work_checkpoint_decisions_are_no_ops_at_the_pomodoro_prompt() {
+        let (s, mut ids) = running_with_pomodoro();
+        let at = fire(s, Event::Tick, 25 * MIN, &mut ids);
+
+        for e in [
+            Event::DecideComplete,
+            Event::DecidePending,
+            Event::DecideExtend { ms: 5 * MIN },
+            Event::DecideBreak { ms: 5 * MIN, complete: true },
+        ] {
+            let label = format!("{e:?}");
+            let after = fire(at.clone(), e, 26 * MIN, &mut ids);
+            assert_eq!(after.timer_state, TimerState::AwaitingPomodoro, "{label} was accepted");
+            assert_eq!(status_of(&after, "A"), TaskStatus::InProgress, "{label} decided the task");
+            assert_eq!(after.queue, at.queue, "{label} rotated the queue");
+        }
+    }
+
+    /// Test 75 — `AddTime` *is* accepted here, unlike at a work checkpoint. The
+    /// refusal there exists so `+time` cannot dodge answering an expired block;
+    /// nothing has expired here, so there is nothing to dodge.
+    #[test]
+    fn t75_add_time_is_accepted_at_the_pomodoro_prompt() {
+        let (s, mut ids) = running_with_pomodoro();
+        let s = fire(s, Event::Tick, 25 * MIN, &mut ids);
+        let s = fire(s, Event::AddTime { task: "A".into(), ms: 10 * MIN }, 25 * MIN, &mut ids);
+
+        assert_eq!(s.current_block().unwrap().remaining_when_paused_ms, Some(15 * MIN));
+        assert_eq!(s.timer_state, TimerState::AwaitingPomodoro, "still an open prompt");
+    }
+
+    /// Test 77 — removing the current task with the prompt open must close the
+    /// window; it has no close affordance of its own.
+    #[test]
+    fn t77_removing_the_current_task_leaves_the_checkpoint() {
+        let (s, mut ids) = running_with_pomodoro();
+        let s = fire(s, Event::Tick, 25 * MIN, &mut ids);
+        let (s, fx) = fire_fx(s, Event::RemoveTask { task: "A".into() }, 26 * MIN, &mut ids);
+
+        assert!(fx.iter().any(|e| matches!(e, Effect::LeaveCheckpoint)));
+        assert_eq!(s.timer_state, TimerState::Running, "B started");
+        assert_eq!(s.current_task().map(|t| t.id.clone()), Some("B".into()));
+    }
+
+    /// Test 78 — a break *expiring* is not a break *ending*. The interval spent
+    /// waiting at the break checkpoint is not rest, so it must not reset.
+    #[test]
+    fn t78_a_break_expiring_is_not_a_break_ending() {
+        let (s, mut ids) = running_with_pomodoro();
+        let s = fire(s, Event::Tick, 25 * MIN, &mut ids);
+        let s = fire(s, Event::DecidePomodoroBreak { ms: 5 * MIN }, 25 * MIN, &mut ids);
+        let since = s.pomodoro_since;
+
+        let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+        assert_eq!(s.timer_state, TimerState::AwaitingDecision, "the break checkpoint");
+        assert_eq!(s.pomodoro_since, since, "expiry alone did not reset it");
+
+        let s = fire(s, Event::EndBreak, 45 * MIN, &mut ids);
+        assert_eq!(s.pomodoro_since, Some(45 * MIN), "answering it did");
+    }
+
+    /// Test 79 — the tray's break item was a live side door, because
+    /// `StartBreak` guarded on `!at_work_checkpoint`, a negation that is *true*
+    /// at the Pomodoro prompt.
+    #[test]
+    fn t79_start_break_is_refused_at_the_pomodoro_prompt() {
+        let (s, mut ids) = running_with_pomodoro();
+        let s = fire(s, Event::Tick, 25 * MIN, &mut ids);
+        let s = fire(s, Event::StartBreak { ms: 5 * MIN }, 26 * MIN, &mut ids);
+
+        assert_eq!(s.timer_state, TimerState::AwaitingPomodoro);
+        assert!(!s.on_break(), "the break was not started");
+    }
+
+    /// Test 80 — `Skip` and `CompleteCurrentTask` carried no checkpoint guard
+    /// at all, and both are reachable from the popover while the prompt is up.
+    #[test]
+    fn t80_skip_and_complete_are_refused_at_the_pomodoro_prompt() {
+        let (s, mut ids) = running_with_pomodoro();
+        let at = fire(s, Event::Tick, 25 * MIN, &mut ids);
+
+        let skipped = fire(at.clone(), Event::Skip, 26 * MIN, &mut ids);
+        assert_eq!(skipped.queue, at.queue, "Skip rotated the task out of the prompt");
+        assert_eq!(skipped.current_block_id, at.current_block_id);
+
+        let completed = fire(at.clone(), Event::CompleteCurrentTask, 26 * MIN, &mut ids);
+        assert_eq!(status_of(&completed, "A"), TaskStatus::InProgress);
+        assert_eq!(completed.current_block_id, at.current_block_id);
+    }
+}

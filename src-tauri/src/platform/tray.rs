@@ -11,7 +11,7 @@ use crate::platform::popover;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
@@ -21,6 +21,11 @@ const ID: &str = "timebox";
 /// (IDLE_TIME D22). It is one item rather than two because it is one subject:
 /// the label follows the state, the way the popover's break control does.
 const BREAK_ITEM: &str = "break-item";
+
+/// The Pomodoro mode toggle (issue #15). A checkable item rather than a
+/// settings-window trip, because the mode is meant to be flipped mid-day —
+/// "I need to get through this one, no interruptions".
+const POMODORO_ITEM: &str = "pomodoro-item";
 
 /// Last pushed title. The tick fires at 1 Hz and every dispatch also refreshes,
 /// so this is what keeps the actual menu bar writes down to the once-a-second
@@ -40,14 +45,21 @@ static BREAK_ITEM_HANDLE: Mutex<Option<MenuItem<tauri::Wry>>> = Mutex::new(None)
 /// would actually read differently — `refresh` runs once a second.
 static LAST_BREAK_ITEM: Mutex<(&'static str, bool)> = Mutex::new(("", true));
 
+static POMODORO_ITEM_HANDLE: Mutex<Option<CheckMenuItem<tauri::Wry>>> = Mutex::new(None);
+static LAST_POMODORO_ITEM: Mutex<(bool, bool)> = Mutex::new((false, true));
+
 pub fn set_show_timer(on: bool) {
     SHOW_TIMER.store(on, Ordering::Relaxed);
 }
 
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let item = MenuItem::with_id(app, BREAK_ITEM, "Take a break", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&item])?;
+    let pomo = CheckMenuItem::with_id(
+        app, POMODORO_ITEM, "Pomodoro mode", true, false, None::<&str>,
+    )?;
+    let menu = Menu::with_items(app, &[&item, &pomo])?;
     *BREAK_ITEM_HANDLE.lock() = Some(item);
+    *POMODORO_ITEM_HANDLE.lock() = Some(pomo);
 
     TrayIconBuilder::with_id(ID)
         .icon(tray_icon())
@@ -59,6 +71,8 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| {
             if event.id() == BREAK_ITEM {
                 toggle_break(app);
+            } else if event.id() == POMODORO_ITEM {
+                toggle_pomodoro(app);
             }
         })
         // A template image is monochrome + alpha; macOS recolors it for the
@@ -89,12 +103,65 @@ fn break_item_for(state: &MachineState) -> (&'static str, bool) {
     if state.on_break() {
         ("End break", true)
     } else {
-        ("Take a break", state.timer_state != TimerState::AwaitingDecision)
+        // Both checkpoints, not just the work one. Testing `!= AwaitingDecision`
+        // left this item *enabled* at the Pomodoro prompt, and `StartBreak`
+        // guarded on `!at_work_checkpoint` accepted it — one click straight out
+        // of a checkpoint that has no side doors (POMODORO_MODE §4.7).
+        (
+            "Take a break",
+            !matches!(
+                state.timer_state,
+                TimerState::AwaitingDecision | TimerState::AwaitingPomodoro
+            ),
+        )
+    }
+}
+
+/// Push the Pomodoro item's tick and enabled flag. Disabled at a checkpoint for
+/// the same reason the break item is: switching the mode off would otherwise be
+/// a way to dismiss its own prompt (D33).
+fn refresh_pomodoro_item(state: &MachineState) {
+    let want = (
+        state.pomodoro_since.is_some(),
+        !matches!(
+            state.timer_state,
+            TimerState::AwaitingDecision | TimerState::AwaitingPomodoro
+        ),
+    );
+    {
+        let mut last = LAST_POMODORO_ITEM.lock();
+        if *last == want {
+            return;
+        }
+        *last = want;
+    }
+    let item = POMODORO_ITEM_HANDLE.lock().clone();
+    if let Some(item) = item {
+        let _ = item.set_checked(want.0);
+        let _ = item.set_enabled(want.1);
+    }
+}
+
+/// Flip Pomodoro mode. As with the break item the reducer decides whether the
+/// change is allowed, so a click that races a checkpoint cannot slip through.
+fn toggle_pomodoro(app: &AppHandle) {
+    use crate::core::timer_machine::Event;
+    let Some(state) = app.try_state::<std::sync::Arc<crate::state::App>>() else { return };
+    let now = crate::state::now_ms();
+    let on = state.snapshot().pomodoro_since.is_none();
+    match state.dispatch(Event::SetPomodoroMode { on }, now) {
+        Ok(fx) => {
+            crate::platform::checkpoint::apply(app, &fx, &state.settings());
+            refresh(app, &state.snapshot(), now);
+            let _ = tauri::Emitter::emit(app, "timebox://changed", ());
+        }
+        Err(e) => eprintln!("[timebox] pomodoro toggle failed: {e}"),
     }
 }
 
 /// Push the break item's label for `state`. A no-op when it would not change.
 fn refresh_menu(state: &MachineState) {
+    refresh_pomodoro_item(state);
     let want = break_item_for(state);
     {
         let mut last = LAST_BREAK_ITEM.lock();

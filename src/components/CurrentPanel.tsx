@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { durStr } from "../core/format";
 import { useTimebox, currentBlock, currentTask, isBreak, taskById } from "../stores/useTimebox";
-import { Countdown } from "./Countdown";
+import { Countdown, PomodoroCountdown } from "./Countdown";
 import { Button, Chip, PriorityDot, SectionLabel } from "./ui";
 import { TaskEditor } from "./TaskEditor";
 
@@ -93,7 +93,16 @@ export function CurrentPanel() {
             {paused && <Chip>Paused — allocation held</Chip>}
           </div>
         </div>
-        <Countdown className={`ml-auto flex-none text-[30px] font-medium tracking-[-0.02em] ${paused ? "text-ink-3" : ""}`} />
+        <div className="ml-auto flex flex-none flex-col items-end">
+          <Countdown className={`text-[30px] font-medium tracking-[-0.02em] ${paused ? "text-ink-3" : ""}`} />
+          {/* The second clock, when Pomodoro mode is on. Labelled, because two
+              bare countdowns side by side say nothing about which is which. */}
+          {snap?.pomodoro && !onBreak && (
+            <span className="mt-0.5 flex items-baseline gap-1 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-3">
+              break in <PomodoroCountdown className="text-[11.5px] text-rest" />
+            </span>
+          )}
+        </div>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => send({ kind: paused ? "resume" : "pause" })} hint="Space">

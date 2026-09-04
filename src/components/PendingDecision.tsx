@@ -10,13 +10,42 @@ import { Button, SectionLabel } from "./ui";
  */
 export function PendingDecision() {
   const { snap, send } = useTimebox();
-  if (!snap || snap.state.timerState !== "AwaitingDecision") return null;
+  const pomodoro = snap?.state.timerState === "AwaitingPomodoro";
+  if (!snap || (snap.state.timerState !== "AwaitingDecision" && !pomodoro)) return null;
 
   const breakMs = breakDefaultMs(snap);
   const breakMinutes = Math.round(breakMs / 60_000);
 
   const block = currentBlock(snap);
   const stale = snap.stalenessMs ?? 0;
+
+  // The Pomodoro prompt decides the break, never the task — so this offers the
+  // same two answers and nothing else. Without it the panel below would render
+  // Pause/Skip/Complete, which the reducer refuses here (POMODORO_MODE §4.7):
+  // controls that look live and do nothing.
+  if (pomodoro) {
+    const task = currentTask(snap);
+    return (
+      <section className="flex flex-col gap-3 rounded-xl border border-rest bg-rest-soft p-4">
+        <SectionLabel>Time for a break</SectionLabel>
+        <p className="text-sm text-ink-2">
+          You&apos;ve worked 25 minutes straight on {task?.title ?? "this task"}.
+          {block?.remainingWhenPausedMs
+            ? ` Your block keeps its ${durStr(block.remainingWhenPausedMs)} either way.`
+            : ""}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" onClick={() => send({ kind: "decidePomodoroBreak", ms: breakMs })}>
+            Take a {breakMinutes}m break
+          </Button>
+          <Button onClick={() => send({ kind: "decideSkipPomodoro" })}>Skip break &amp; continue</Button>
+        </div>
+        {stale > 120_000 && (
+          <p className="text-xs text-ink-3">Waiting {durStr(stale)}.</p>
+        )}
+      </section>
+    );
+  }
 
   if (isBreak(snap)) {
     const nextId = snap.state.queue[0];

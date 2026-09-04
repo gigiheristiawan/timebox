@@ -25,7 +25,11 @@ export function Checkpoint() {
   const [chosenBreakMin, setChosenBreakMin] = useState<number | null>(null);
   const [customMin, setCustomMin] = useState("");
 
-  const awaiting = snap?.state.timerState === "AwaitingDecision";
+  // Both checkpoints. Gating on `=== "AwaitingDecision"` alone rendered the
+  // bare surface below for a Pomodoro prompt — an empty, always-on-top window
+  // with no close affordance, since this screen has none by design.
+  const pomodoro = snap?.state.timerState === "AwaitingPomodoro";
+  const awaiting = snap?.state.timerState === "AwaitingDecision" || pomodoro;
   const onBreak = isBreak(snap);
   const breakMin = chosenBreakMin ?? Math.round(breakDefaultMs(snap) / 60_000);
   const setBreakMin = setChosenBreakMin;
@@ -36,6 +40,11 @@ export function Checkpoint() {
       const el = e.target as HTMLElement | null;
       if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
       const ms = breakMin * 60_000;
+      if (pomodoro) {
+        if (e.key === "1" || e.key === "Enter") void send({ kind: "decidePomodoroBreak", ms });
+        if (e.key === "2") void send({ kind: "decideSkipPomodoro" });
+        return;
+      }
       if (onBreak) {
         if (e.key === "1" || e.key === "Enter") void send({ kind: "endBreak" });
         if (e.key === "2") void send({ kind: "extendBreak", ms: 5 * 60_000 });
@@ -50,7 +59,7 @@ export function Checkpoint() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [awaiting, onBreak, breakMin, send]);
+  }, [awaiting, onBreak, pomodoro, breakMin, send]);
 
   if (!snap || !awaiting) {
     return <div className="min-h-screen bg-surface" />;
@@ -59,6 +68,37 @@ export function Checkpoint() {
   const block = currentBlock(snap);
   const alloc = block ? block.plannedMs + block.extensionMs : 0;
   const stale = snap.stalenessMs ?? 0;
+
+  if (pomodoro) {
+    const task = currentTask(snap);
+    const left = block?.remainingWhenPausedMs ?? 0;
+    return (
+      <Shell tone="rest" kicker="Time for a break" heading={task?.title ?? "Current task"}>
+        <p className="text-sm text-ink-2">
+          You've worked 25 minutes straight. Your block has {durStr(left)} left either way.
+        </p>
+
+        {stale > STALENESS_FLOOR_MS && (
+          <Warn>This prompt has been waiting {durStr(stale)}.</Warn>
+        )}
+
+        <div className="mt-6 flex w-full max-w-[380px] flex-col gap-3">
+          <Action
+            tone="rest"
+            num="1 · ⏎"
+            onClick={() => send({ kind: "decidePomodoroBreak", ms: breakMin * 60_000 })}
+          >
+            Take a {breakMin}m break
+          </Action>
+          <Action num="2" onClick={() => send({ kind: "decideSkipPomodoro" })}>
+            Skip break &amp; continue
+          </Action>
+        </div>
+
+        <Note>Your task keeps its remaining time either way</Note>
+      </Shell>
+    );
+  }
 
   if (onBreak) {
     const nextId = snap.state.queue[0];

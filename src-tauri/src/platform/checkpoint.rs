@@ -4,7 +4,7 @@
 //! Mac or interfere with other applications — it uses ordinary macOS window
 //! activation to demand attention (SPEC §7.4).
 
-use crate::core::model::BlockKind;
+use crate::core::model::CheckpointKind;
 use crate::core::timer_machine::Effect;
 use crate::db::settings::Settings;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -104,13 +104,20 @@ fn play_sound() {
 
 /// Best-effort. If the user denied notification permission the checkpoint
 /// window and the sound still fire, so the app stays fully functional.
-fn notify(app: &AppHandle, kind: BlockKind, task: Option<&str>, minutes: i64) {
+fn notify(app: &AppHandle, kind: CheckpointKind, task: Option<&str>, minutes: i64) {
     let (title, body) = match kind {
-        BlockKind::Break => (
+        CheckpointKind::Pomodoro => (
+            "TIME FOR A BREAK".to_string(),
+            format!(
+                "{}\nYou've worked {minutes} minutes straight. Take a break, or keep going.",
+                task.unwrap_or("Current task")
+            ),
+        ),
+        CheckpointKind::Break => (
             "BREAK'S OVER".to_string(),
             format!("Your {minutes}-minute break has ended. Pick up the queue when you're ready."),
         ),
-        BlockKind::Work => (
+        CheckpointKind::Work => (
             "TIME'S UP".to_string(),
             format!(
                 "{}\nYour {minutes}-minute time block has ended. Choose what to do next.",

@@ -17,6 +17,7 @@ pub fn title(state: &MachineState, now: Millis, show_timer: bool) -> String {
         TimerState::Idle => String::new(),
         TimerState::Paused => "◉ PAUSED".to_string(),
         TimerState::AwaitingDecision => "⚠ TIME'S UP".to_string(),
+        TimerState::AwaitingPomodoro => "☕ BREAK?".to_string(),
         TimerState::Running => {
             let clock = clock_str(state.remaining_ms(now));
             if state.on_break() {

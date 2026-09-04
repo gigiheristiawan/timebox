@@ -35,6 +35,17 @@ pub struct Snapshot {
     /// here for the same reason `summary` is: local midnight is a shell
     /// concern, and the UI must not do date arithmetic of its own (SPEC R7).
     pub done_today: Vec<crate::core::model::TaskId>,
+    /// Pomodoro mode, or `None` when it is off (issue #15). `remainingMs` is
+    /// computed here for the same reason `summary` is: the UI must not sum
+    /// spans or compare instants of its own (SPEC R7), and it never concludes
+    /// the pomodoro is due — at 00:00 it shows zero and waits for the backend.
+    pub pomodoro: Option<Pomodoro>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pomodoro {
+    pub remaining_ms: Millis,
 }
 
 fn snapshot_of(app: &App) -> Snapshot {
@@ -65,6 +76,9 @@ fn snapshot_of(app: &App) -> Snapshot {
             .filter(|t| t.done_today(day_start))
             .map(|t| t.id.clone())
             .collect(),
+        pomodoro: state
+            .pomodoro_remaining_ms(now)
+            .map(|remaining_ms| Pomodoro { remaining_ms }),
         settings,
         state,
         now,
@@ -94,6 +108,9 @@ pub enum Action {
     EditTask { task: String, title: String, priority: Priority, daily: bool },
     #[serde(rename_all = "camelCase")]
     AddTime { task: String, ms: Millis },
+    DecidePomodoroBreak { ms: Millis },
+    DecideSkipPomodoro,
+    SetPomodoroMode { on: bool },
     RemoveTask { task: String },
     Reorder { moved: String, before: String },
 }
@@ -113,6 +130,9 @@ impl From<Action> for Event {
             Action::EndBreak => Event::EndBreak,
             Action::ExtendBreak { ms } => Event::ExtendBreak { ms },
             Action::StartBreak { ms } => Event::StartBreak { ms },
+            Action::DecidePomodoroBreak { ms } => Event::DecidePomodoroBreak { ms },
+            Action::DecideSkipPomodoro => Event::DecideSkipPomodoro,
+            Action::SetPomodoroMode { on } => Event::SetPomodoroMode { on },
             // Deserialized straight into `Priority` rather than parsed from a
             // String: `Priority::parse` reads the *database* encoding (`HIGH`),
             // the UI sends the serde one (`High`), so every task silently
@@ -321,5 +341,34 @@ mod tests {
             Event::EditTask { daily, .. } => assert!(daily),
             e => panic!("expected EditTask, got {e:?}"),
         }
+    }
+
+    /// The three Pomodoro actions (issue #15). A wrong field name here does not
+    /// fail loudly — `setPomodoroMode` would simply never deserialize and the
+    /// mode would stay off forever, which looks like "the toggle is broken"
+    /// rather than "the wire is wrong".
+    #[test]
+    fn the_pomodoro_actions_cross_the_wire() {
+        let on: Action = serde_json::from_str(r#"{"kind":"setPomodoroMode","on":true}"#)
+            .expect("the UI's shape must deserialize");
+        assert!(matches!(Event::from(on), Event::SetPomodoroMode { on: true }));
+
+        let brk: Action = serde_json::from_str(r#"{"kind":"decidePomodoroBreak","ms":300000}"#)
+            .expect("the UI's shape must deserialize");
+        assert!(matches!(Event::from(brk), Event::DecidePomodoroBreak { ms: 300_000 }));
+
+        let skip: Action = serde_json::from_str(r#"{"kind":"decideSkipPomodoro"}"#)
+            .expect("the UI's shape must deserialize");
+        assert!(matches!(Event::from(skip), Event::DecideSkipPomodoro));
+    }
+
+    /// `AWAITING_POMODORO` is what the *database* stores; `AwaitingPomodoro` is
+    /// what the UI sees. The two encodings are deliberately different and both
+    /// are load-bearing — the TS union in `ipc/types.ts` matches the latter.
+    #[test]
+    fn the_pomodoro_timer_state_serializes_for_the_ui() {
+        let json = serde_json::to_string(&crate::core::model::TimerState::AwaitingPomodoro).unwrap();
+        assert_eq!(json, r#""AwaitingPomodoro""#);
+        assert_eq!(crate::core::model::TimerState::AwaitingPomodoro.as_str(), "AWAITING_POMODORO");
     }
 }
