@@ -55,7 +55,7 @@ mod tests {
             queue: vec!["t1".into()],
             ..Default::default()
         };
-        let (s, _) = reduce(s, Event::SwitchTo { task: "t1".into() }, now, &mut ids);
+        let (s, _) = reduce(s, Event::SwitchTo { task: "t1".into() }, now, 0, &mut ids);
         (s, ids)
     }
 
@@ -80,8 +80,8 @@ mod tests {
     #[test]
     fn a_break_is_labelled_so_the_glance_never_reads_as_work() {
         let (s, mut ids) = running(60_000, 0);
-        let (s, _) = reduce(s, Event::Tick, 60_000, &mut ids);
-        let (s, _) = reduce(s, Event::DecideBreak { ms: 300_000, complete: false }, 60_000, &mut ids);
+        let (s, _) = reduce(s, Event::Tick, 60_000, 0, &mut ids);
+        let (s, _) = reduce(s, Event::DecideBreak { ms: 300_000, complete: false }, 60_000, 0, &mut ids);
         // SPEC §7.1 writes this example as `4:12`; minutes are padded here so the
         // title cannot change width mid-countdown and shove the menu bar around.
         assert_eq!(title(&s, 60_000 + 48_000, true), "◔ BREAK 04:12");
@@ -90,10 +90,10 @@ mod tests {
     #[test]
     fn paused_and_awaiting_state_themselves_rather_than_showing_a_frozen_clock() {
         let (s, mut ids) = running(30 * 60_000, 0);
-        let (paused, _) = reduce(s.clone(), Event::Pause, 60_000, &mut ids);
+        let (paused, _) = reduce(s.clone(), Event::Pause, 60_000, 0, &mut ids);
         assert_eq!(title(&paused, 60_000, true), "◉ PAUSED");
 
-        let (expired, _) = reduce(s, Event::Tick, 30 * 60_000, &mut ids);
+        let (expired, _) = reduce(s, Event::Tick, 30 * 60_000, 0, &mut ids);
         assert_eq!(title(&expired, 30 * 60_000, true), "⚠ TIME'S UP");
     }
 
@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn menu_bar_show_timer_off_yields_icon_only_in_every_state() {
         let (s, mut ids) = running(30 * 60_000, 0);
-        let (expired, _) = reduce(s.clone(), Event::Tick, 30 * 60_000, &mut ids);
+        let (expired, _) = reduce(s.clone(), Event::Tick, 30 * 60_000, 0, &mut ids);
         for st in [&s, &expired] {
             assert_eq!(title(st, 30 * 60_000, false), "");
         }

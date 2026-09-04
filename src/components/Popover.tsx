@@ -55,7 +55,10 @@ export function Popover() {
   const onBreak = isBreak(snap ?? null);
   const paused = state === "Paused";
   const queue = snap?.state.queue ?? [];
-  const nextId = queue.find((id) => !(block?.taskId === id && state !== "Idle"));
+  const doneToday = snap?.doneToday ?? [];
+  const nextId = queue.find(
+    (id) => !(block?.taskId === id && state !== "Idle") && !doneToday.includes(id),
+  );
   const next = nextId ? taskById(snap ?? null, nextId) : undefined;
   const breakMin = chosenBreakMin ?? Math.round(breakDefaultMs(snap ?? null) / 60_000);
   // D22: available from IDLE, RUNNING and PAUSED. At a work checkpoint the
@@ -155,20 +158,28 @@ export function Popover() {
           if (!t) return null;
           const current = block?.taskId === id && state !== "Idle";
           const parked = parkedFor(snap ?? null, id);
+          // Ticked off for today: still listed, because seeing the dailies you
+          // have already done is the point of keeping them in the queue.
+          const done = doneToday.includes(id);
           return (
             <button
               key={id}
               type="button"
+              disabled={done}
+              title={done ? "Done for today — back tomorrow" : undefined}
               onClick={() => send({ kind: "switchTo", task: id })}
               className={`flex w-full items-center gap-2 py-[2.5px] text-left text-[12.5px] ${
-                current ? "font-semibold text-ink" : "text-ink-2 hover:text-ink"
+                done ? "text-ink-3 opacity-60"
+                : current ? "font-semibold text-ink"
+                : "text-ink-2 hover:text-ink"
               }`}
             >
-              <span className="w-3 flex-none text-accent">{current ? "→" : ""}</span>
+              <span className="w-3 flex-none text-accent">{done ? "✓" : current ? "→" : ""}</span>
               <PriorityDot priority={t.priority} />
-              <span className="truncate">{t.title}</span>
+              <span className={`truncate ${done ? "line-through" : ""}`}>{t.title}</span>
               <span className="tabular ml-auto flex-none pl-2 font-mono text-[11px] text-ink-3">
-                {parked?.remainingWhenPausedMs != null
+                {done ? "today"
+                  : parked?.remainingWhenPausedMs != null
                   ? `${clockStr(parked.remainingWhenPausedMs)} left`
                   : durStr(t.blockDurationMs)}
               </span>

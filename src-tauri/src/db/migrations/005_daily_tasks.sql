@@ -1,0 +1,11 @@
+-- Recurring daily tasks (issue #16).
+--
+-- A daily task is never `DONE` and never leaves the queue: completing one only
+-- makes it done *for today*, which is derived by comparing `completed_at`
+-- against local midnight rather than stored. That is deliberate — a stored
+-- flag would need a midnight reset to fire, and the app is routinely not
+-- running when the day turns over.
+--
+-- Existing tasks are ordinary ones, so the default is the whole migration for
+-- them.
+ALTER TABLE tasks ADD COLUMN daily INTEGER NOT NULL DEFAULT 0;

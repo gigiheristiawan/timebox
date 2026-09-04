@@ -22,12 +22,29 @@ fn day() -> (MachineState, SeqIds) {
     (s, SeqIds::new("b"))
 }
 
+/// Local midnight for the fixtures below. The clock in these tests starts at
+/// the epoch, so the day they all sit in is the one beginning at 0; only the
+/// daily-task tests (issue #16) care what this is, and they pass their own.
+const DAY: Millis = 0;
+
 fn fire(s: MachineState, e: Event, now: Millis, ids: &mut SeqIds) -> MachineState {
-    reduce(s, e, now, ids).0
+    reduce(s, e, now, DAY, ids).0
 }
 
 fn fire_fx(s: MachineState, e: Event, now: Millis, ids: &mut SeqIds) -> (MachineState, Vec<Effect>) {
-    reduce(s, e, now, ids)
+    reduce(s, e, now, DAY, ids)
+}
+
+/// `fire` for a named day, so a test can put `now` on one side of midnight or
+/// the other.
+fn fire_on(
+    s: MachineState,
+    e: Event,
+    now: Millis,
+    day_start: Millis,
+    ids: &mut SeqIds,
+) -> MachineState {
+    reduce(s, e, now, day_start, ids).0
 }
 
 fn status_of(s: &MachineState, id: &str) -> TaskStatus {
@@ -452,6 +469,7 @@ fn adding_a_task_queues_it_without_starting_anything() {
         title: "  Write the release notes  ".into(),
         block_ms: 20 * MIN,
         priority: Priority::Low,
+        daily: false,
     }, 0, &mut ids);
 
     assert_eq!(s.timer_state, TimerState::Idle, "adding never starts work");
@@ -463,8 +481,8 @@ fn adding_a_task_queues_it_without_starting_anything() {
 #[test]
 fn a_blank_or_zero_length_task_is_rejected() {
     let (s, mut ids) = day();
-    let s = fire(s, Event::AddTask { title: "   ".into(), block_ms: 30 * MIN, priority: Priority::Medium }, 0, &mut ids);
-    let s = fire(s, Event::AddTask { title: "ok".into(), block_ms: 0, priority: Priority::Medium }, 0, &mut ids);
+    let s = fire(s, Event::AddTask { title: "   ".into(), block_ms: 30 * MIN, priority: Priority::Medium , daily: false}, 0, &mut ids);
+    let s = fire(s, Event::AddTask { title: "ok".into(), block_ms: 0, priority: Priority::Medium , daily: false}, 0, &mut ids);
     assert_eq!(s.tasks.len(), 4, "neither was added");
 }
 
@@ -475,6 +493,7 @@ fn editing_a_task_renames_and_reprioritises_it_without_touching_its_block() {
         task: "A".into(),
         title: "  Draft the release notes  ".into(),
         priority: Priority::High,
+        daily: false,
     }, 5 * MIN, &mut ids);
 
     let t = s.tasks.iter().find(|t| t.id == "A").unwrap();
@@ -489,13 +508,13 @@ fn editing_a_task_renames_and_reprioritises_it_without_touching_its_block() {
 #[test]
 fn an_edit_cannot_blank_a_title() {
     let (s, mut ids) = day();
-    let s = fire(s, Event::EditTask { task: "A".into(), title: "   ".into(), priority: Priority::High }, 0, &mut ids);
+    let s = fire(s, Event::EditTask { task: "A".into(), title: "   ".into(), priority: Priority::High , daily: false}, 0, &mut ids);
     let t = s.tasks.iter().find(|t| t.id == "A").unwrap();
     assert_eq!(t.title, "Fix attendance bug", "the blank edit was refused whole");
     assert_eq!(t.priority, Priority::Medium, "including the priority that rode with it");
 
     // An unknown task is a no-op, not a panic.
-    let s = fire(s, Event::EditTask { task: "Z".into(), title: "x".into(), priority: Priority::Low }, 0, &mut ids);
+    let s = fire(s, Event::EditTask { task: "Z".into(), title: "x".into(), priority: Priority::Low , daily: false}, 0, &mut ids);
     assert_eq!(s.tasks.len(), 4);
 }
 
@@ -552,7 +571,7 @@ fn adding_time_is_refused_at_a_checkpoint_and_never_shortens_anything() {
 fn adding_while_running_does_not_disturb_the_current_block() {
     let (s, mut ids) = start_a(0);
     let before = s.current_block().unwrap().clone();
-    let s = fire(s, Event::AddTask { title: "later".into(), block_ms: 15 * MIN, priority: Priority::Medium }, 5 * MIN, &mut ids);
+    let s = fire(s, Event::AddTask { title: "later".into(), block_ms: 15 * MIN, priority: Priority::Medium , daily: false}, 5 * MIN, &mut ids);
 
     assert_eq!(s.current_block().unwrap(), &before);
     assert_eq!(s.remaining_ms(5 * MIN), 25 * MIN);
@@ -1230,5 +1249,176 @@ mod cross_day {
 
         assert_eq!(today(&s, 0, at(1, 1, 0)).worked_ms, 2 * HOUR);
         assert_eq!(today(&s, 1, at(1, 1, 0)).worked_ms, 0);
+    }
+}
+
+/// Daily tasks — issue #16. Tests 54–60.
+///
+/// The premise: a daily is *never* Done and never leaves the queue. Completing
+/// one only makes it done for today, which is derived from `completed_at`
+/// against local midnight rather than stored, so nothing has to fire when the
+/// day turns over — including on a day the app was never running.
+mod daily {
+    use super::*;
+    use crate::core::summary::{summarize, Today};
+
+    const HOUR: Millis = 60 * MIN;
+    const DAY_MS: Millis = 24 * HOUR;
+
+    /// A queue whose head, `A`, recurs daily; `B` is ordinary.
+    fn with_daily_a() -> (MachineState, SeqIds) {
+        let (mut s, ids) = day();
+        s.tasks.iter_mut().find(|t| t.id == "A").unwrap().daily = true;
+        (s, ids)
+    }
+
+    fn task<'a>(s: &'a MachineState, id: &str) -> &'a crate::core::model::Task {
+        s.tasks.iter().find(|t| t.id == id).unwrap()
+    }
+
+    fn today(s: &MachineState, day: i64, now: Millis) -> Today {
+        let start = day * DAY_MS;
+        summarize(s, start, start + DAY_MS, now, 8 * HOUR, None).today
+    }
+
+    /// Test 54 — the whole point of the feature. An ordinary task disappears
+    /// when completed; a daily stays, so tomorrow it is there to be done again.
+    #[test]
+    fn t54_completing_a_daily_leaves_it_in_the_queue_and_not_done() {
+        let (s, mut ids) = with_daily_a();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        let s = fire(s, Event::CompleteCurrentTask, 10 * MIN, &mut ids);
+
+        assert!(s.queue.contains(&"A".to_string()), "a daily never leaves the queue");
+        assert_eq!(task(&s, "A").status, TaskStatus::Todo, "a daily is never Done");
+        assert_eq!(task(&s, "A").completed_at, Some(10 * MIN), "but it is stamped");
+
+        // The contrast: an ordinary task completed the same way is gone.
+        let s = fire(s, Event::SwitchTo { task: "B".into() }, 11 * MIN, &mut ids);
+        let s = fire(s, Event::CompleteCurrentTask, 12 * MIN, &mut ids);
+        assert!(!s.queue.contains(&"B".to_string()));
+        assert_eq!(task(&s, "B").status, TaskStatus::Done);
+    }
+
+    /// Test 55 — done for today means *inert*, not merely deprioritised.
+    /// Rotation must step over it, or completing the queue head would restart
+    /// the task that was just ticked off.
+    #[test]
+    fn t55_rotation_skips_a_daily_already_done_today() {
+        let (s, mut ids) = with_daily_a();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        let s = fire(s, Event::CompleteCurrentTask, 10 * MIN, &mut ids);
+
+        assert_eq!(
+            s.current_task().map(|t| t.id.clone()),
+            Some("B".into()),
+            "rotation must step over the daily it just ticked off"
+        );
+        // The head is always whatever is running, so A cannot literally hold
+        // index 0 — what matters is that completing it did not rotate it to
+        // the tail the way Skip and Pending do. It keeps its place in the
+        // order, so tomorrow the dailies are where they were dragged.
+        assert_eq!(s.queue, vec!["B", "A", "C", "D"]);
+    }
+
+    /// Test 56 — and a manual click is refused for the same reason, so the
+    /// tick is a fact about the day rather than a suggestion.
+    #[test]
+    fn t56_switching_to_a_daily_done_today_is_refused() {
+        let (s, mut ids) = with_daily_a();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        let s = fire(s, Event::CompleteCurrentTask, 10 * MIN, &mut ids);
+        let running = s.current_task().map(|t| t.id.clone());
+
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 11 * MIN, &mut ids);
+        assert_eq!(s.current_task().map(|t| t.id.clone()), running, "nothing moved");
+    }
+
+    /// Test 57 — the reset needs no event. Same state, next day's `day_start`,
+    /// and the task is startable again. This is what makes a quit over
+    /// midnight, or a machine asleep for a week, come back correct.
+    #[test]
+    fn t57_a_daily_is_startable_again_the_next_day_with_no_reset_event() {
+        let (s, mut ids) = with_daily_a();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        let s = fire(s, Event::CompleteCurrentTask, 10 * MIN, &mut ids);
+        assert!(task(&s, "A").done_today(0));
+
+        let tomorrow = DAY_MS;
+        assert!(!task(&s, "A").done_today(tomorrow));
+        let s = fire_on(s, Event::SwitchTo { task: "A".into() }, tomorrow, tomorrow, &mut ids);
+        assert_eq!(s.current_task().map(|t| t.id.clone()), Some("A".into()));
+    }
+
+    /// Test 58 — tomorrow's block is a *fresh* allocation. A daily completed
+    /// at 10 minutes into a 30-minute block would otherwise resume with 20
+    /// minutes left, carrying a closed day's remainder into the next one.
+    #[test]
+    fn t58_completing_a_daily_discards_its_parked_block() {
+        let (s, mut ids) = with_daily_a();
+        // Park A mid-block by switching away, then come back and complete it.
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        let s = fire(s, Event::SwitchTo { task: "B".into() }, 10 * MIN, &mut ids);
+        assert!(s.parked_for(&"A".to_string()).is_some(), "A is parked with 20m left");
+
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 11 * MIN, &mut ids);
+        let s = fire(s, Event::CompleteCurrentTask, 12 * MIN, &mut ids);
+        assert!(s.parked_for(&"A".to_string()).is_none(), "the remainder is void");
+
+        let tomorrow = DAY_MS;
+        let s = fire_on(s, Event::SwitchTo { task: "A".into() }, tomorrow, tomorrow, &mut ids);
+        assert_eq!(
+            s.remaining_ms(tomorrow),
+            30 * MIN,
+            "a new day starts on the task's full allocation, not yesterday's remainder"
+        );
+    }
+
+    /// Test 59 — ticking a daily off counts in Today exactly like any other
+    /// completion, and stops counting as outstanding. Counting it in both
+    /// columns is the failure this pins.
+    #[test]
+    fn t59_a_daily_counts_as_completed_today_and_not_as_pending() {
+        let (s, mut ids) = with_daily_a();
+        let before = today(&s, 0, 0);
+        assert_eq!(before.tasks_completed, 0);
+        assert_eq!(before.tasks_pending, 4);
+
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        let s = fire(s, Event::CompleteCurrentTask, 10 * MIN, &mut ids);
+
+        let t = today(&s, 0, 11 * MIN);
+        assert_eq!(t.tasks_completed, 1, "a daily is a thing you did today");
+        assert_eq!(t.tasks_pending, 3, "and is not also outstanding");
+
+        // Tomorrow it is outstanding again and no longer counted as done.
+        let t = today(&s, 1, DAY_MS);
+        assert_eq!(t.tasks_completed, 0);
+        assert_eq!(t.tasks_pending, 4);
+    }
+
+    /// Test 60 — turning recurrence off on a task already ticked today must
+    /// not leave a `Todo` task carrying a completion stamp: neither done nor
+    /// cleanly outstanding, and invisible in both columns of Today.
+    #[test]
+    fn t60_un_marking_a_daily_clears_its_completion_stamp() {
+        let (s, mut ids) = with_daily_a();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        let s = fire(s, Event::CompleteCurrentTask, 10 * MIN, &mut ids);
+
+        let s = fire(
+            s,
+            Event::EditTask {
+                task: "A".into(),
+                title: "Fix attendance bug".into(),
+                priority: Priority::Medium,
+                daily: false,
+            },
+            11 * MIN,
+            &mut ids,
+        );
+        assert!(!task(&s, "A").daily);
+        assert_eq!(task(&s, "A").completed_at, None);
+        assert_eq!(today(&s, 0, 12 * MIN).tasks_pending, 4, "it is outstanding again");
     }
 }

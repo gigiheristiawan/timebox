@@ -30,6 +30,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "work_spans",
         sql: include_str!("migrations/004_work_spans.sql"),
     },
+    Migration {
+        version: 5,
+        name: "daily_tasks",
+        sql: include_str!("migrations/005_daily_tasks.sql"),
+    },
 ];
 
 pub fn run(conn: &mut Connection) -> crate::error::AppResult<()> {
@@ -142,6 +147,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!((start, end, days), (540, 1080, 31));
+
+        // Migration 005: an existing task is an ordinary one, not a daily —
+        // the reverse would silently make every task in a user's queue
+        // recurring and un-completable.
+        let daily: i64 = conn
+            .query_row("SELECT daily FROM tasks WHERE id = 't1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(daily, 0);
     }
 
     #[test]

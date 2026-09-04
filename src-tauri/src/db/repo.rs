@@ -19,15 +19,15 @@ pub fn save(conn: &mut Connection, state: &MachineState, now: Millis) -> rusqlit
     for t in &state.tasks {
         tx.execute(
             "INSERT INTO tasks (id, title, status, priority, block_duration_ms,
-                                queue_position, created_at, completed_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+                                daily, queue_position, created_at, completed_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
              ON CONFLICT(id) DO UPDATE SET
                 title=excluded.title, status=excluded.status, priority=excluded.priority,
-                block_duration_ms=excluded.block_duration_ms,
+                block_duration_ms=excluded.block_duration_ms, daily=excluded.daily,
                 queue_position=excluded.queue_position, completed_at=excluded.completed_at",
             params![
                 t.id, t.title, t.status.as_str(), t.priority.as_str(),
-                t.block_duration_ms, pos_of(&t.id), t.created_at, t.completed_at
+                t.block_duration_ms, t.daily, pos_of(&t.id), t.created_at, t.completed_at
             ],
         )?;
     }
@@ -93,7 +93,7 @@ pub fn load(conn: &Connection) -> rusqlite::Result<MachineState> {
     {
         let mut stmt = conn.prepare(
             "SELECT id, title, status, priority, block_duration_ms, queue_position,
-                    created_at, completed_at
+                    created_at, completed_at, daily
              FROM tasks ORDER BY queue_position IS NULL, queue_position, created_at",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -108,6 +108,7 @@ pub fn load(conn: &Connection) -> rusqlite::Result<MachineState> {
                     status: TaskStatus::parse(&status).unwrap_or(TaskStatus::Todo),
                     priority: Priority::parse(&priority).unwrap_or(Priority::Medium),
                     block_duration_ms: r.get(4)?,
+                    daily: r.get(8)?,
                     created_at: r.get(6)?,
                     completed_at: r.get(7)?,
                 },

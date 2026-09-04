@@ -26,7 +26,7 @@ export function QuickAdd({ open, onClose }: { open: boolean; onClose: () => void
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (title.trim() === "") return;
-    void send({ kind: "addTask", title, blockMs, priority: "Medium" });
+    void send({ kind: "addTask", title, blockMs, priority: "Medium", daily: false });
     onClose();
   };
 

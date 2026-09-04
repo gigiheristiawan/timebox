@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Date (WIB)       | Change                                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| 2026-09-04 10:55 | **Daily tasks (issue #16).** `Task` gains `daily: bool`; a daily is never `Done` and never leaves the queue, and "done today" is *derived* — `Task::done_today(day_start)` reads `completed_at >= day_start` — so there is no midnight reset to fire and nothing to miss when the app is closed over the day boundary. `reduce` therefore takes **`day_start` beside `now`** (`state::day_start_ms`), the same injection `core::summary` already gets. `start_next` picks the first *startable* task rather than the queue head, `switch_to` refuses a daily done today, and `finish_task` discards its parked block so tomorrow starts on a fresh allocation. Migration **005** adds `tasks.daily`. `Snapshot.doneToday` carries the ids so the UI does no date arithmetic. `docs/features/DAILY_TASKS.md`, D23–D26, tests 54–61. |
 | 2026-08-28 15:24 | **Rule 18 added** — an issue is worked on its own branch, `bugs/<n>-<slug>` or `feature/<n>-<slug>`, never on `main`, and the hand-over order is commit → Gigih pushes → PR with `Closes #<n>`. Written down after issues #10 and #11 each needed the branch name and the pause before pushing asked for by hand. |
 | 2026-08-28 15:22 | **`scripts/build-release.sh`** now runs the DMG/GitHub release end to end — preflight, universal signed build, the DMG notarization Tauri skips, staple, `verify-release.sh`, draft release — as `build-mas.sh` does for the App Store. The version bump and release notes stay manual; the script refuses to run without them. `docs/RELEASE.md` "The short path". |
 | 2026-08-28 15:20 | **`+5 min` during a break added nothing (issue #10).** `Event::ExtendBreak` in `core/timer_machine.rs` set `end_at = now + ms`, replacing the remainder rather than extending it — correct only at the break checkpoint, where none is left. It now pushes `end_at` forward while the break runs, adds to `remaining_when_paused_ms` while paused (staying paused, as `AddTime` does), and keeps `now + ms` at the checkpoint. `docs/SPEC.md` §7.2, `docs/features/IDLE_TIME.md` test 53. |
@@ -319,13 +320,21 @@ Each is enforced and tested; changing one changes what the product is.
 - **Idle is inferred, work is observed.** `idle_ms` is *working-window time no running block covered* — a set difference over intervals, never `window − worked − break`, which goes negative when a block spans `work_end`. Outside the window, work is recorded (`outside_hours_ms`) and idle is not: no claim of presence was made there. A day with no blocks reports no idle at all (D19), which is the holiday and sick-day answer.
 - **An open idle span survives a quit and keeps accruing.** Paused is still paused whether or not the app is alive (D15). This is why `repo::load` returns the open span open, and why D20's "close it at the last state write" was revised away — see `docs/features/IDLE_TIME.md`.
 - **A deliberate break parks the work block and leaves the task at the queue head.** Unlike a switch, which rotates to the tail, and unlike a switch it counts no `interruptions` — D11 measures churn between tasks (D22).
+- **A daily task is never `Done` and never leaves the queue**, and *done today*
+  is derived from `completed_at` against local midnight rather than stored. A
+  stored flag would need something to fire at midnight, and the app is routinely
+  not running then. Done-today means inert, not deprioritised: rotation steps
+  over it and an explicit switch is refused, or the same task could be completed
+  twice in a day and counted twice in Today. Completing one discards its parked
+  block — SPEC D10 bounds a task within a run of work, not across a day that has
+  been closed out (DAILY_TASKS D23–D26).
 - **Break blocks carry no task**, never count as worked, and do not consume daily capacity.
 - **Away time is banked, not derived.** `settle_away` runs only on an *accepted* checkpoint decision. Deriving it from `end_at` afterwards would count every parked block as time waiting at a checkpoint, and banking it on a rejected event would count a single wait twice. (Tests in `core::tests`)
 
 ## Docs
 
 - **`docs/SPEC.md`** is authoritative for the MVP. Numbered decisions `D1`–`D14` (resolved ambiguities, each with its reasoning), stack rationale `R1`–`R8` (labelled _Inherited_ vs _Chosen_), and acceptance tests 1–22. If code and spec disagree, fix one deliberately and say which. D14 is struck — see D16.
-- **`docs/features/`** holds the specs that extend it, each with its own decisions and acceptance tests continuing the same numbering: `IDLE_TIME.md` (D15–D20, D22; tests 23–33, 42–47) with `IDLE_TIME_PLAN.md` beside it, and `SLEEP_DETECTION.md` (D21; tests 34–41, **not yet implemented**).
+- **`docs/features/`** holds the specs that extend it, each with its own decisions and acceptance tests continuing the same numbering: `IDLE_TIME.md` (D15–D20, D22; tests 23–33, 42–47) with `IDLE_TIME_PLAN.md` beside it, `DAILY_TASKS.md` (D23–D26; tests 54–61), and `SLEEP_DETECTION.md` (D21; tests 34–41, **not yet implemented**).
 - **`docs/IMPLEMENTATION_PLAN.md`** tracks per-task status across 8 phases plus open questions. Update it as work lands.
 - **`docs/RELEASE.md`** is the release runbook — icon regeneration, universal build, signing, notarization, and the performance check, with the exact commands.
 - **`docs/mockup.html`** is the interactive design reference — the real product logic in a single HTML file. Useful for checking intended interaction before building a component.
@@ -368,7 +377,7 @@ socket is sandbox-illegal; `RunEvent::Reopen` in `lib.rs` covers the same
 
 ## Gotchas
 
-- Migrations store **milliseconds**, matching the core exactly; second-granularity would accumulate rounding into real drift. `001` was rewritten in place pre-release; `002` (`away_ms`, `first_run_done`), `003` (the working window and `idle_spans`) and `004` (`work_spans`) followed the forward-only rule. From here, add a `005`.
+- Migrations store **milliseconds**, matching the core exactly; second-granularity would accumulate rounding into real drift. `001` was rewritten in place pre-release; `002` (`away_ms`, `first_run_done`), `003` (the working window and `idle_spans`), `004` (`work_spans`) and `005` (`tasks.daily`) followed the forward-only rule. From here, add a `006`.
 - `available_work_minutes_per_day`, `work_start_minutes` and `work_end_minutes` are the columns in **minutes** — `db/settings.rs` converts at the boundary so the rest of the app stays in milliseconds. The two window columns are a wall-clock *time of day*, not a duration: `state::window_for` resolves them against a local date, so a DST day's window still starts at 09:00 by the clock on the wall.
 - **`Cmd+Q` does not emit `RunEvent::ExitRequested`.** It is muda's predefined Quit item, which sends `terminate:` straight to `NSApplication`; tao sees `applicationWillTerminate` and emits **`Exit` only**. Anything that must happen before the process dies — the D16 park in `lib.rs` is the one that matters — belongs on `RunEvent::Exit`, which every quit path reaches including `handle.exit(0)`. Hooked on `ExitRequested` it fails silently, and only from `Cmd+Q`: the popover's Quit item still worked, which is what made it look fine.
 - `idle_spans` has a partial unique index on the open row, so `repo::save` writes the closed spans **before** the open one — inserting a newly opened span before the previous one's `ended_at` lands would be rejected.

@@ -99,7 +99,7 @@ impl App {
         let loaded = db.with(repo::load)?;
         let settings = db.with(settings::load)?;
         let mut ids = UuidIds;
-        let (state, _fx) = reduce(loaded, Event::Tick, now, &mut ids);
+        let (state, _fx) = reduce(loaded, Event::Tick, now, day_start_ms(now), &mut ids);
         db.with_mut(|c| repo::save(c, &state, now))?;
 
         let running = state.timer_state == TimerState::Running;
@@ -137,7 +137,7 @@ impl App {
         let mut guard = self.machine.lock();
         let (next, fx) = {
             let mut ids = self.ids.lock();
-            reduce(guard.clone(), event, now, &mut *ids)
+            reduce(guard.clone(), event, now, day_start_ms(now), &mut *ids)
         };
         self.db.with_mut(|c| repo::save(c, &next, now))?;
         *guard = next;

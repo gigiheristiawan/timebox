@@ -41,6 +41,11 @@ export function Queue() {
           const parked = parkedFor(snap, id);
           const left = parked?.remainingWhenPausedMs ?? null;
           const editRow = editing === id;
+          // A daily already ticked off today keeps its place in the queue but
+          // cannot be started until tomorrow (issue #16). The backend refuses
+          // the switch either way; the row says so rather than looking live
+          // and doing nothing.
+          const doneToday = snap.doneToday.includes(id);
 
           return (
             <div
@@ -49,15 +54,18 @@ export function Queue() {
               tabIndex={editRow ? -1 : 0}
               role="button"
               draggable={!editRow}
+              aria-disabled={doneToday || undefined}
               title={
-                left != null
+                doneToday
+                  ? "Done for today — this daily task comes back tomorrow"
+                  : left != null
                   ? `Resume this block — ${clockStr(left)} of its allocation is left`
                   : "Start this task now — the running block is set down, keeping its remaining time"
               }
-              onClick={() => { if (!editRow) void send({ kind: "switchTo", task: id }); }}
+              onClick={() => { if (!editRow && !doneToday) void send({ kind: "switchTo", task: id }); }}
               onKeyDown={(e) => {
                 if (editRow) return;
-                if (e.key === "Enter") { e.preventDefault(); void send({ kind: "switchTo", task: id }); }
+                if (e.key === "Enter" && !doneToday) { e.preventDefault(); void send({ kind: "switchTo", task: id }); }
                 if (e.key === "ArrowDown") { e.preventDefault(); focusSibling(e.currentTarget, 1); }
                 if (e.key === "ArrowUp") { e.preventDefault(); focusSibling(e.currentTarget, -1); }
               }}
@@ -79,8 +87,9 @@ export function Queue() {
                 if (moved && moved !== id) void send({ kind: "reorder", moved, before: id });
                 setDragging(null); setOver(null);
               }}
-              className={`group flex ${editRow ? "cursor-default" : "cursor-grab"} items-center gap-2.5 rounded-lg border px-[9px] py-[7px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+              className={`group flex ${editRow ? "cursor-default" : doneToday ? "cursor-default" : "cursor-grab"} items-center gap-2.5 rounded-lg border px-[9px] py-[7px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                 over === id ? "border-accent bg-accent-soft"
+                : doneToday ? "border-transparent bg-surface-2 opacity-50"
                 : left != null ? "border-transparent bg-warn-soft"
                 : "border-transparent bg-surface-2 hover:border-line-2"
               }`}
@@ -92,12 +101,22 @@ export function Queue() {
               ) : (
                 <>
                 <PriorityDot priority={task.priority} />
-                <span className="min-w-0 flex-1 truncate text-[13.5px]">{task.title}</span>
+                <span className={`min-w-0 flex-1 truncate text-[13.5px] ${doneToday ? "line-through" : ""}`}>
+                  {task.title}
+                </span>
+                {task.daily && (
+                  <span
+                    title="Recurs every day"
+                    className="shrink-0 rounded-[5px] bg-surface-3 px-[6px] py-[2px] font-mono text-[10px] uppercase tracking-wide text-ink-3"
+                  >
+                    daily
+                  </span>
+                )}
                 <span className={`font-mono text-[11.5px] ${left != null ? "font-medium text-warn" : "text-ink-2"}`}>
                   {left != null ? `${clockStr(left)} left` : durStr(task.blockDurationMs)}
                 </span>
                 <span className="rounded-[5px] bg-accent-soft px-[7px] py-[2px] font-mono text-[10.5px] text-accent-ink opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                  {left != null ? "Resume ▶" : "Start ▶"}
+                  {doneToday ? "✓ today" : left != null ? "Resume ▶" : "Start ▶"}
                 </span>
                 <button
                   type="button"

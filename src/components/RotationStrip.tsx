@@ -13,7 +13,9 @@ export function RotationStrip() {
   const block = currentBlock(snap);
   if (!snap) return null;
 
-  const ids = snap.state.queue.slice(0, 7);
+  // A daily already ticked off today is not part of what is left to do
+  // (issue #16), so it is not a segment of the remaining rotation.
+  const ids = snap.state.queue.filter((id) => !snap.doneToday.includes(id)).slice(0, 7);
   const onBreak = isBreak(snap);
   const breakMs = onBreak && block ? block.plannedMs + block.extensionMs : 0;
   const total = ids.reduce((n, id) => n + queuedMs(snap, id), 0) + breakMs;
