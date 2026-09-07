@@ -3,8 +3,8 @@
 How to produce a distributable TimeBox build. Phase 8 of
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Current state:** **0.1.0 through 0.3.1 are published**, and **0.3.2 is in
-flight** — version bumped (build 6), notes written; the signed/notarized build
+**Current state:** **0.1.0 through 0.4.0 are published**, and **0.4.1 is in
+flight** — version bumped (build 8), notes written; the signed/notarized build
 has not been made yet.
 The 0.1.0 DMG is attached to the [v0.1.0
 release](https://github.com/gigiheristiawan/timebox/releases/tag/v0.1.0) and the
@@ -18,6 +18,7 @@ Pages) is done and marked as such where it appears.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-09-07 13:50 | 0.4.1 bumped: the five files of §0 plus `CFBundleVersion` 7 → **8**. Notes in `docs/release-notes/0.4.1.md`. A one-fix release — the checkpoint window opening half off the screen after a monitor change (issue #20). No migration. |
 | 2026-09-07 10:55 | **0.4.0 built unnotarized, and the retry hid why.** `build-release.sh` sourced the env file — which exports only `APPLE_API_KEY_PATH` — and then exported `APPLE_SIGNING_IDENTITY` and `APPLE_API_KEY_PATH` alone, so `APPLE_API_KEY` and `APPLE_API_ISSUER` reached the script but never `tauri build`. Tauri saw an incomplete set, warned, and signed without notarizing; the preflight guard written to catch exactly this passed, because it tested the *script's* shell variables rather than the child's environment. (0.3.2 verified as notarized, so the env file has drifted since; the script no longer relies on what it exports.) It surfaced only as a staple that could not find a ticket — indistinguishable from Apple's propagation delay, and the retry loop's message asserted the delay. All four are exported now. The three staples (`.app`, the copy inside the DMG, the DMG) also share one `staple` helper at 10 × 60s instead of one 5 × 30s loop and two bare single attempts, and its exhaustion message names *not notarized* as the likelier cause with the `spctl` line that decides it. §3. |
 | 2026-08-28 16:55 | **A repacked DMG loses its signature.** Tauri signs the DMG it builds; `hdiutil convert` writes a new file and carries nothing over, so the repacked container was stapled, notarized — and rejected by Gatekeeper with `source=no usable signature`. `build-release.sh` now re-signs the DMG after a repack and notarizes *after* that, since signing rewrites the file and voids any ticket. The "already stapled, skip" shortcut now also requires `spctl` to accept: a ticket alone is not a verdict, and a DMG can be stapled and unsigned at the same time. |
 | 2026-08-28 16:30 | **Tauri's staple of the `.app` can silently miss, and the DMG is then built around the unstapled copy** — seen on the 0.3.2 build: `spctl` said *Notarized Developer ID*, `stapler validate` said no ticket, and stapling by hand minutes later worked. `--wait` returns on Apple's **verdict**; the ticket `stapler` fetches is published a little after that, and Tauri only warns when it misses the window. `build-release.sh` now staples the app with retries, decides from the copy *inside* the DMG whether the container is stale, and repacks it (`hdiutil convert` → mount → staple → convert back) instead of rebuilding — the re-notarization of the rewritten container follows on its own. `verify-release.sh` gains an eighth check for the app inside the DMG: the other seven all passed while it carried no ticket. |
