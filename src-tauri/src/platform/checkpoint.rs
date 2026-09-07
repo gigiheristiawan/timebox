@@ -7,7 +7,10 @@
 use crate::core::model::CheckpointKind;
 use crate::core::timer_machine::Effect;
 use crate::db::settings::Settings;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
+};
 use tauri_plugin_notification::NotificationExt;
 
 pub const LABEL: &str = "checkpoint";
@@ -36,23 +39,24 @@ pub fn apply(app: &AppHandle, fx: &[Effect], settings: &Settings) {
     }
 }
 
-/// Fill the display the user is actually looking at — the one under the cursor —
-/// rather than always the primary.
+/// Fill the main display — the one carrying the menu bar, which is what macOS's
+/// "Main display" setting names.
 fn show(app: &AppHandle) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window(LABEL) {
+        // The window is reused across checkpoints, so its geometry is whatever
+        // the display it was last shown on dictated. Displays come and go —
+        // unplug the external monitor a checkpoint was sized for and the stored
+        // frame no longer describes any screen, which is how the window came
+        // back covering half of the built-in one (issue #20). Re-fit on every
+        // show rather than trusting the frame.
+        fit_to_main_monitor(app, &w);
         w.show()?;
         w.set_always_on_top(true)?;
         w.set_focus()?;
         return Ok(());
     }
 
-    let monitor = app
-        .cursor_position()
-        .ok()
-        .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
-        .or_else(|| app.primary_monitor().ok().flatten());
-
-    let mut builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html".into()))
+    let builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html".into()))
         .title("Time's up")
         .decorations(false)
         .always_on_top(true)
@@ -61,18 +65,13 @@ fn show(app: &AppHandle) -> tauri::Result<()> {
         .maximizable(false)
         .minimizable(false)
         .closable(false)
-        .visible(true);
-
-    if let Some(m) = monitor {
-        let scale = m.scale_factor();
-        let pos = m.position().to_logical::<f64>(scale);
-        let size = m.size().to_logical::<f64>(scale);
-        builder = builder
-            .position(pos.x, pos.y)
-            .inner_size(size.width, size.height);
-    }
+        // Built hidden and shown only once it has been fitted, so the window
+        // never flashes at the default size on the wrong display.
+        .visible(false);
 
     let window = builder.build()?;
+    fit_to_main_monitor(app, &window);
+    window.show()?;
 
     // There is no exit path from a checkpoint. Cmd+W and any other close route
     // are refused; only a decision dismisses it (SPEC §7.4).
@@ -86,6 +85,55 @@ fn show(app: &AppHandle) -> tauri::Result<()> {
 
     window.set_focus()?;
     Ok(())
+}
+
+/// The frame of the main display, in **logical** points, falling back to the
+/// one under the cursor.
+///
+/// The cursor's display was the original rule (SPEC §8) on the argument that it
+/// is where the user is looking. It is not, reliably: the pointer is wherever
+/// it was abandoned, which on a two-monitor desk is routinely a screen nobody
+/// is facing, and the checkpoint would then open somewhere different each time
+/// for no reason the user can see. The main display is the one macOS itself
+/// treats as the front of the desk, and it is a *setting* — so the checkpoint
+/// always lands in the same, chosen place.
+///
+/// Units: a monitor reports its frame in physical pixels, and the conversion
+/// has to use *that monitor's* scale factor — but the setters below convert
+/// whatever they are handed using the **window's** scale factor, which is the
+/// display it currently sits on. Hand them physical pixels and a Retina window
+/// moving to a 1× display (or the reverse) is sized by the wrong factor: that
+/// is how the window came out twice the screen with its content centred off the
+/// bottom-right corner. Converting here and passing logical makes their
+/// conversion an identity, so only the monitor's own factor is ever used.
+fn main_monitor_frame(app: &AppHandle) -> Option<(LogicalPosition<f64>, LogicalSize<f64>)> {
+    let monitor = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| {
+            app.cursor_position()
+                .ok()
+                .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
+        })?;
+    let scale = monitor.scale_factor();
+    Some((
+        monitor.position().to_logical(scale),
+        monitor.size().to_logical(scale),
+    ))
+}
+
+/// Best-effort: a checkpoint that is mispositioned is still a checkpoint, and
+/// failing to place it must never stop it being shown.
+fn fit_to_main_monitor(app: &AppHandle, window: &WebviewWindow) {
+    let Some((pos, size)) = main_monitor_frame(app) else {
+        return;
+    };
+    // Size first, then position: resizing keeps the top-left corner, so the
+    // move is what lands the window on the right screen.
+    if let Err(e) = window.set_size(size).and_then(|_| window.set_position(pos)) {
+        eprintln!("[timebox] could not fit the checkpoint to the display: {e}");
+    }
 }
 
 fn hide(app: &AppHandle) {
