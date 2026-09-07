@@ -40,6 +40,45 @@ bold=$'\033[1m'; red=$'\033[31m'; dim=$'\033[2m'; off=$'\033[0m'
 fail() { echo "${red}error:${off} $*" >&2; exit 1; }
 step() { printf '\n%s\n' "${bold}==> $*${off}"; }
 
+# `stapler` does not ask Apple for a verdict — it downloads the ticket from the
+# distribution servers, which publish it some minutes *after* `notarytool
+# --wait` returns Accepted. Every staple in this script can lose that race, so
+# all of them go through here rather than only the first one.
+#
+# The budget is generous on purpose. By the time any staple runs, the build and
+# the notarization are already paid for; ten minutes of waiting is far cheaper
+# than throwing that away. A staple that is going to succeed usually does so on
+# the first or second attempt, so the budget costs nothing in the normal case.
+STAPLE_ATTEMPTS=${STAPLE_ATTEMPTS:-10}
+STAPLE_INTERVAL=${STAPLE_INTERVAL:-60}
+staple() { # staple <path-to-app-or-dmg>
+  local target="$1" attempt
+  for (( attempt = 1; attempt <= STAPLE_ATTEMPTS; attempt++ )); do
+    if xcrun stapler staple "$target"; then return 0; fi
+    if [ "$attempt" -eq "$STAPLE_ATTEMPTS" ]; then break; fi
+    echo "  attempt $attempt/$STAPLE_ATTEMPTS: no ticket yet — retrying in ${STAPLE_INTERVAL}s"
+    sleep "$STAPLE_INTERVAL"
+  done
+  return 1
+}
+
+# Two very different things produce an unstaplable target, and the wait above
+# only helps one of them: a ticket that has not propagated *yet*, versus a build
+# that was never notarized at all and never will be. Name both, and give the
+# command that tells them apart.
+staple_failed() { # staple_failed <path> <what>
+  fail "could not staple $2 after $STAPLE_ATTEMPTS attempts
+($(( STAPLE_ATTEMPTS * STAPLE_INTERVAL / 60 )) minutes — long past Apple's usual propagation delay).
+
+The likely cause is that it was never notarized, not that the ticket is slow.
+Tauri only *warns* when its notarization credentials are incomplete, and builds
+a signed-but-unnotarized bundle. Check which it is:
+
+  spctl -a -vvv -t install \"$1\"
+
+\`source=Unnotarized Developer ID\` means there is no ticket to wait for."
+}
+
 # The Key ID and Issuer ID are account-wide secrets and stay out of the repo
 # (RELEASE.md §3). Keep them in this file — mode 600, in a 700 directory —
 # and the script needs no arguments; or export them yourself beforehand.
@@ -51,7 +90,12 @@ fi
 
 : "${APPLE_SIGNING_IDENTITY:=Developer ID Application: Gigih Eristiawan (SQ3B3PDL4S)}"
 : "${APPLE_API_KEY_PATH:=$HOME/.secrets/AuthKey_${APPLE_API_KEY:-}_appstoreconnect.p8}"
-export APPLE_SIGNING_IDENTITY APPLE_API_KEY_PATH
+# All four must be *exported*: `npm run tauri:build:universal` is a child
+# process, and the env file assigns the Key ID and Issuer without `export`.
+# Tauri needs all three notarization variables; given only two it warns and
+# builds signed-but-unnotarized — and the preflight below still passes,
+# because this shell can see variables the child cannot.
+export APPLE_SIGNING_IDENTITY APPLE_API_KEY_PATH APPLE_API_KEY APPLE_API_ISSUER
 
 # Tauri picks the Apple ID credentials over the API key when both are present,
 # and a stale APPLE_ID in the shell then makes the build ask for a password it
@@ -135,21 +179,12 @@ fi
 # warning. What comes out is an app that is notarized but carries no proof of
 # it, sealed inside a DMG that was built a moment later.
 #
-# So: staple it here, retrying for as long as the delay usually lasts.
+# So: staple it here, waiting out the propagation delay.
 if xcrun stapler validate "$APP" >/dev/null 2>&1; then
   echo "  the .app is already stapled"
 else
   step "stapling the .app (Tauri's staple did not take)"
-  stapled=0
-  for attempt in 1 2 3 4 5; do
-    if xcrun stapler staple "$APP"; then stapled=1; break; fi
-    echo "  attempt $attempt: the ticket is not published yet — retrying in 30s"
-    sleep 30
-  done
-  [ "$stapled" = 1 ] || fail "the app could not be stapled after five attempts.
-If it was never notarized, the §3 credentials were missing from the shell that
-ran the build — Tauri warns and carries on without them. Check with:
-  spctl -a -vvv -t install \"$APP\""
+  staple "$APP" || staple_failed "$APP" "TimeBox.app"
 fi
 
 # Whether the DMG has to be rebuilt is decided by the copy *inside* it, never
@@ -185,7 +220,10 @@ if [ "$REPACK" = 1 ]; then
   rm -rf "$RW" "$MNT" && mkdir -p "$MNT"
   hdiutil convert "$DMG" -format UDRW -o "$RW" -quiet
   hdiutil attach "$RW" -nobrowse -mountpoint "$MNT" -quiet
-  xcrun stapler staple "$MNT/TimeBox.app"
+  # This is the copy that ends up in /Applications, so it gets the same wait as
+  # the loose bundle rather than one bare attempt. `cleanup` runs on the way out
+  # of `fail`, so the RW image is never left mounted.
+  staple "$MNT/TimeBox.app" || staple_failed "$MNT/TimeBox.app" "the app inside the DMG"
   hdiutil detach "$MNT" -quiet
   hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o "$DMG" -ov -quiet
 
@@ -227,7 +265,7 @@ else
     --wait
 
   step "stapling the ticket"
-  xcrun stapler staple "$DMG"
+  staple "$DMG" || staple_failed "$DMG" "the DMG"
 fi
 
 # -------------------------------------------------------------------- verify
