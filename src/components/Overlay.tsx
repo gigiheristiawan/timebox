@@ -32,7 +32,11 @@ export function Overlay() {
   // the state it is most useful in is the one where the user has drifted off
   // the queue entirely, and a card that disappeared would take the reminder
   // with it (D47).
-  const idle = !snap || state === "Idle" || !task;
+  //
+  // `!task` alone is not "nothing running": a break block deliberately carries
+  // no task, so a running break read as idle and the card showed today's idle
+  // total in place of the break countdown (issue #27).
+  const idle = !snap || state === "Idle" || (!task && !onBreak);
 
   const label = onBreak ? "Break" : paused ? "Paused" : idle ? "Idle" : "Focus";
   const tone = onBreak ? "text-rest" : paused || idle ? "text-ink-3" : "text-ink";
@@ -41,7 +45,7 @@ export function Overlay() {
   // UI shows. The clock is not interpolated here — it moves in minutes, and the
   // store refetches every 10s while the timer is stopped.
   const idleMs = snap?.summary.today.idleMs ?? 0;
-  const sub = onBreak ? "Break time" : idle ? "Nothing running" : task.title;
+  const sub = onBreak ? "Break time" : idle || !task ? "Nothing running" : task.title;
 
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center overflow-hidden rounded-[12px] border border-line bg-surface px-3">
