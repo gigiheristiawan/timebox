@@ -3,8 +3,8 @@
 How to produce a distributable TimeBox build. Phase 8 of
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Current state:** **0.1.0 through 0.4.1 are published**, and **0.5.0 is in
-flight** — version bumped (build 9), notes written; the signed/notarized build
+**Current state:** **0.1.0 through 0.5.0 are published**, and **0.5.1 is in
+flight** — version bumped (build 10), notes written; the signed/notarized build
 has not been made yet.
 The 0.1.0 DMG is attached to the [v0.1.0
 release](https://github.com/gigiheristiawan/timebox/releases/tag/v0.1.0) and the
@@ -18,6 +18,7 @@ Pages) is done and marked as such where it appears.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-09-10 11:52 | 0.5.1 bumped: the five files of §0 plus `CFBundleVersion` 9 → **10**. Notes in `docs/release-notes/0.5.1.md`. A one-fix release — the timer overlay never updating after the block it mounted with, and a running break showing today's idle total where the break countdown belongs (issue #27). No migration. |
 | 2026-09-10 10:05 | 0.5.0 bumped: the five files of §0 plus `CFBundleVersion` 8 → **9**. Notes in `docs/release-notes/0.5.0.md`. Two features since 0.4.1 — the floating timer overlay (issue #23) and the tinted current block (issue #22). **Migration 007** ships with it, adding the four `settings.overlay_*` columns; the overlay arrives switched off. |
 | 2026-09-07 13:50 | 0.4.1 bumped: the five files of §0 plus `CFBundleVersion` 7 → **8**. Notes in `docs/release-notes/0.4.1.md`. A one-fix release — the checkpoint window opening half off the screen after a monitor change (issue #20). No migration. |
 | 2026-09-07 10:55 | **0.4.0 built unnotarized, and the retry hid why.** `build-release.sh` sourced the env file — which exports only `APPLE_API_KEY_PATH` — and then exported `APPLE_SIGNING_IDENTITY` and `APPLE_API_KEY_PATH` alone, so `APPLE_API_KEY` and `APPLE_API_ISSUER` reached the script but never `tauri build`. Tauri saw an incomplete set, warned, and signed without notarizing; the preflight guard written to catch exactly this passed, because it tested the *script's* shell variables rather than the child's environment. (0.3.2 verified as notarized, so the env file has drifted since; the script no longer relies on what it exports.) It surfaced only as a staple that could not find a ticket — indistinguishable from Apple's propagation delay, and the retry loop's message asserted the delay. All four are exported now. The three staples (`.app`, the copy inside the DMG, the DMG) also share one `staple` helper at 10 × 60s instead of one 5 × 30s loop and two bare single attempts, and its exhaustion message names *not notarized* as the likelier cause with the `spctl` line that decides it. §3. |
