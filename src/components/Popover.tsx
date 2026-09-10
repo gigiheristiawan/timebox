@@ -69,6 +69,17 @@ export function Popover() {
   const atCheckpoint = state === "AwaitingDecision" || state === "AwaitingPomodoro";
   const canBreak = !!snap && !atCheckpoint && !onBreak;
   const pomodoroOn = snap?.pomodoro != null;
+  // Issue #22: the current block gets a tint, so "is something running, and
+  // what kind" is answered before anything is read. At a checkpoint it stays
+  // plain — the banner below already carries the colour, and tinting behind it
+  // would erase it.
+  const tint = atCheckpoint
+    ? ""
+    : onBreak
+      ? "bg-rest-soft"
+      : task
+        ? (paused ? "bg-surface-2" : "bg-accent-soft")
+        : "";
 
   return (
     <div
@@ -78,129 +89,144 @@ export function Popover() {
       {error && <p className="bg-alert-soft px-3.5 py-2 text-xs text-alert">{error}</p>}
 
       {/* Current -------------------------------------------------------- */}
-      <section className={SECTION}>
-        <div className={LABEL}>{onBreak ? "On a break" : "Current"}</div>
-        <div
-          className={`mt-1 truncate text-[13.5px] font-semibold leading-[1.3] ${onBreak ? "text-rest-ink" : ""}`}
-          title={task?.title}
-        >
-          {onBreak ? "Break" : (task?.title ?? "Nothing running")}
-        </div>
-
-        <Countdown
-          className={`block pb-0.5 pt-1.5 text-center text-[34px] font-medium leading-none tracking-[-0.02em] ${
-            state === "AwaitingDecision"
-              ? "text-alert"
-              : state === "AwaitingPomodoro"
-                ? "text-rest"
-                : onBreak
-                  ? "text-rest"
-                  : paused
-                    ? "text-ink-3"
-                    : ""
-          }`}
-        />
-
-        {snap?.pomodoro && !onBreak && (
-          <div className="flex items-baseline justify-center gap-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-3">
-            break in <PomodoroCountdown className="text-[11px] text-rest" />
+      <section>
+        <div className={`${SECTION} transition-colors ${tint}`}>
+          <div className={LABEL}>{onBreak ? "On a break" : "Current"}</div>
+          <div
+            className={`mt-1 truncate text-[13.5px] font-semibold leading-[1.3] ${onBreak ? "text-rest-ink" : ""}`}
+            title={task?.title}
+          >
+            {onBreak ? "Break" : (task?.title ?? "Nothing running")}
           </div>
-        )}
 
-        {next && (
-          <>
-            <div className={`${LABEL} mt-2`}>Next</div>
-            <div className="mt-0.5 truncate text-[13px] text-ink-2">{next.title}</div>
-          </>
-        )}
+          <Countdown
+            className={`block pb-0.5 pt-1.5 text-center text-[34px] font-medium leading-none tracking-[-0.02em] ${
+              state === "AwaitingDecision"
+                ? "text-alert"
+                : state === "AwaitingPomodoro"
+                  ? "text-rest"
+                  : onBreak
+                    ? "text-rest"
+                    : paused
+                      ? "text-ink-3"
+                      : ""
+            }`}
+          />
 
-        <div className="mt-2 flex gap-2">
-          {atCheckpoint ? (
-            // The checkpoint owns the decision and has no side doors (SPEC §7.4).
-            <p
-              className={`flex-1 rounded-md px-2.5 py-1.5 text-[12px] leading-snug ${
-                state === "AwaitingPomodoro"
-                  ? "bg-rest-soft text-rest-ink"
-                  : "bg-alert-soft text-alert"
-              }`}
-            >
-              {state === "AwaitingPomodoro"
-                ? "Break or keep going — the checkpoint is waiting."
-                : "The checkpoint is waiting for your decision."}
-            </p>
-          ) : onBreak ? (
-            <>
-              <PopButton onClick={() => send({ kind: "extendBreak", ms: 5 * 60_000 })}>+5 min</PopButton>
-              <PopButton primary onClick={() => send({ kind: "endBreak" })}>End break</PopButton>
-            </>
-          ) : task ? (
-            <>
-              <PopButton onClick={() => send({ kind: paused ? "resume" : "pause" })}>
-                {paused ? "Resume" : "Pause"}
-              </PopButton>
-              <PopButton onClick={() => send({ kind: "skip" })}>Skip</PopButton>
-              <PopButton primary onClick={() => send({ kind: "completeCurrentTask" })}>Complete</PopButton>
-            </>
-          ) : (
-            <PopButton primary disabled={!next} onClick={() => next && send({ kind: "switchTo", task: next.id })}>
-              Start next
-            </PopButton>
+          {snap?.pomodoro && !onBreak && (
+            <div className="flex items-baseline justify-center gap-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-3">
+              break in <PomodoroCountdown className="text-[11px] text-rest" />
+            </div>
           )}
+
+          {next && (
+            <>
+              <div className={`${LABEL} mt-2`}>Next</div>
+              <div className="mt-0.5 truncate text-[13px] text-ink-2">{next.title}</div>
+            </>
+          )}
+
+          <div className="mt-2 flex gap-2">
+            {atCheckpoint ? (
+              // The checkpoint owns the decision and has no side doors (SPEC §7.4).
+              <p
+                className={`flex-1 rounded-md px-2.5 py-1.5 text-[12px] leading-snug ${
+                  state === "AwaitingPomodoro"
+                    ? "bg-rest-soft text-rest-ink"
+                    : "bg-alert-soft text-alert"
+                }`}
+              >
+                {state === "AwaitingPomodoro"
+                  ? "Break or keep going — the checkpoint is waiting."
+                  : "The checkpoint is waiting for your decision."}
+              </p>
+            ) : onBreak ? (
+              <>
+                <PopButton onClick={() => send({ kind: "extendBreak", ms: 5 * 60_000 })}>+5 min</PopButton>
+                <PopButton primary onClick={() => send({ kind: "endBreak" })}>End break</PopButton>
+              </>
+            ) : task ? (
+              <>
+                <PopButton onClick={() => send({ kind: paused ? "resume" : "pause" })}>
+                  {paused ? "Resume" : "Pause"}
+                </PopButton>
+                <PopButton onClick={() => send({ kind: "skip" })}>Skip</PopButton>
+                <PopButton primary onClick={() => send({ kind: "completeCurrentTask" })}>Complete</PopButton>
+              </>
+            ) : (
+              <PopButton primary disabled={!next} onClick={() => next && send({ kind: "switchTo", task: next.id })}>
+                Start next
+              </PopButton>
+            )}
+          </div>
         </div>
-        {/* Take a break (IDLE_TIME D22) ---------------------------------- */}
+
+        {/* Take a break (IDLE_TIME D22). Its own warm band (issue #22), so the
+            one control that is neither the current block nor a setting reads as
+            neither. `alert-soft` was asked for by eye, against the palette's
+            grammar — it is the checkpoint's colour elsewhere — but nothing else
+            is warm, and this row never shows while a checkpoint is open. It
+            fades in from the surface rather than starting as a flat block, so
+            the band reads as the foot of the card. `from-surface` and not
+            `from-transparent`: a transparent stop interpolates through
+            transparent *black* in WebKit and greys the top of the fade. */}
         {canBreak && (
-          <div className="mt-2.5 flex items-center gap-1.5 border-t border-line pt-2.5">
-            <button
-              type="button"
-              onClick={() => send({ kind: "startBreak", ms: breakMin * 60_000 })}
-              className="rounded-md border border-rest px-2.5 py-1 text-[12.5px] font-medium text-rest-ink transition-colors hover:bg-rest hover:text-white"
-            >
-              Take a break
-            </button>
-            <div className="ml-auto flex gap-1">
-              {BREAK_CHOICES.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setChosenBreakMin(m)}
-                  aria-pressed={m === breakMin}
-                  className={`rounded border px-1.5 py-0.5 font-mono text-[10.5px] transition-colors ${
-                    m === breakMin ? "border-rest bg-rest text-white" : "border-line-2 text-ink-3 hover:bg-surface-3"
-                  }`}
-                >
-                  {m}m
-                </button>
-              ))}
+          <div className="bg-gradient-to-b from-surface to-alert-soft px-3.5">
+            <div className="flex items-center gap-1.5 py-2.5">
+              <button
+                type="button"
+                onClick={() => send({ kind: "startBreak", ms: breakMin * 60_000 })}
+                className="rounded-md border border-rest px-2.5 py-1 text-[12.5px] font-medium text-rest-ink transition-colors hover:bg-rest hover:text-white"
+              >
+                Take a break
+              </button>
+              <div className="ml-auto flex gap-1">
+                {BREAK_CHOICES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setChosenBreakMin(m)}
+                    aria-pressed={m === breakMin}
+                    className={`rounded border px-1.5 py-0.5 font-mono text-[10.5px] transition-colors ${
+                      m === breakMin ? "border-rest bg-rest text-white" : "border-line-2 text-ink-3 hover:bg-surface-3"
+                    }`}
+                  >
+                    {m}m
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
 
-        {/* Pomodoro mode (issue #15). A quick toggle here as well as in
-            Settings, because the mode is meant to be flipped mid-day — "I need
-            to get through this one, no interruptions" — and a trip to the
-            settings window is friction enough that it would go unused.
-            Disabled at either checkpoint for the same reason the break control
-            is: switching the mode off must not become a way to dismiss its own
-            prompt (D33). */}
-        <div className="mt-2.5 flex items-center gap-2 border-t border-line pt-2.5">
-          <span className="text-[12.5px] text-ink-2">Pomodoro mode</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={pomodoroOn}
-            aria-label="Pomodoro mode"
-            disabled={atCheckpoint}
-            onClick={() => send({ kind: "setPomodoroMode", on: !pomodoroOn })}
-            className={`ml-auto flex h-[18px] w-[32px] flex-none items-center rounded-full border px-[2px] transition-colors ${
-              pomodoroOn ? "border-rest bg-rest" : "border-line-2 bg-surface-3"
-            } ${atCheckpoint ? "cursor-not-allowed opacity-40" : ""}`}
-          >
-            <span
-              className={`h-[12px] w-[12px] rounded-full bg-white shadow-sm transition-transform ${
-                pomodoroOn ? "translate-x-[14px]" : ""
-              }`}
-            />
-          </button>
+        <div className="px-3.5">
+          {/* Pomodoro mode (issue #15). A quick toggle here as well as in
+              Settings, because the mode is meant to be flipped mid-day — "I need
+              to get through this one, no interruptions" — and a trip to the
+              settings window is friction enough that it would go unused.
+              Disabled at either checkpoint for the same reason the break control
+              is: switching the mode off must not become a way to dismiss its own
+              prompt (D33). */}
+          <div className="flex items-center gap-2 border-t border-line py-2.5">
+            <span className="text-[12.5px] text-ink-2">Pomodoro mode</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={pomodoroOn}
+              aria-label="Pomodoro mode"
+              disabled={atCheckpoint}
+              onClick={() => send({ kind: "setPomodoroMode", on: !pomodoroOn })}
+              className={`ml-auto flex h-[18px] w-[32px] flex-none items-center rounded-full border px-[2px] transition-colors ${
+                pomodoroOn ? "border-rest bg-rest" : "border-line-2 bg-surface-3"
+              } ${atCheckpoint ? "cursor-not-allowed opacity-40" : ""}`}
+            >
+              <span
+                className={`h-[12px] w-[12px] rounded-full bg-white shadow-sm transition-transform ${
+                  pomodoroOn ? "translate-x-[14px]" : ""
+                }`}
+              />
+            </button>
+          </div>
         </div>
       </section>
 
