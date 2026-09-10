@@ -59,7 +59,19 @@ export const useTimebox = create<Store>((set, get) => ({
     await get().refresh();
     // The backend nudges once a second while a block runs; between nudges the
     // countdown is interpolated locally.
-    const un = await listen("timebox://changed", () => void get().refresh());
+    //
+    // Guarded rather than awaited bare: `listen` is a *core* command, so a
+    // window missing from `capabilities/default.json` is refused it — and an
+    // unguarded rejection here took the poll below down with it, leaving the
+    // surface frozen on the snapshot it mounted with, silently (issue #27).
+    // The listener is the fast path, not the only one.
+    let un = () => {};
+    try {
+      un = await listen("timebox://changed", () => void get().refresh());
+    } catch (e) {
+      console.error("[timebox] no live updates on this window:", e);
+      set({ error: String(e) });
+    }
 
     // While the timer is NOT running there are no nudges at all: the tick
     // thread parks on a condvar in IDLE / PAUSED / AWAITING_DECISION, which is

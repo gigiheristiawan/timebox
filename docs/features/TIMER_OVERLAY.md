@@ -22,6 +22,8 @@ Status: **implemented** (issue
 
 | Date (WIB)       | Change                                                            |
 | ---------------- | ----------------------------------------------------------------- |
+| 2026-09-10 11:35 | **A running break read as idle (issue #27).** A break block carries no task, and `!task` was the card's whole test for *nothing running*, so it painted today's idle total over the break countdown. §5. |
+| 2026-09-10 11:27 | **The card never updated (issue #27).** `overlay` was missing from `capabilities/default.json`, so the window was refused `event.listen` and never saw a `timebox://changed`. §3.1. |
 | 2026-09-10 09:55 | Initial version. D47–D52; migration 007; acceptance tests 102–106. |
 
 ---
@@ -86,7 +88,26 @@ routes it in `src/main.tsx` like every other surface, and the countdown is the
 shared `Countdown` component, so the overlay cannot disagree with the popover
 about the time remaining.
 
-### 3.1 Units, again
+### 3.1 The capability list
+
+The overlay is a window, and **every window label must be named in
+`src-tauri/capabilities/default.json`**. A window left out still runs the app's
+own `#[tauri::command]`s — those need no permission — so it mounts, fetches its
+snapshot and paints correctly, and then never changes again: `listen` is a
+*core* command, it is refused, and no `timebox://changed` is ever delivered.
+That was issue #27. The card looked alive because `Countdown` interpolates
+locally, so it counted its first block down to 00:00 and stayed there, through
+breaks, switches and checkpoints alike.
+
+Nothing in the failure is visible from Rust: the emit succeeds, the window is
+there, and the only signal is a rejected promise in a webview with no console
+open. `useTimebox.init` now catches it, records the error and still installs the
+10s poll — a refused listener costs the second-by-second nudge, not every
+update. `settings` was missing from the same list and had the same defect; it
+went unnoticed because that window is opened, changed and closed inside a few
+seconds.
+
+### 3.2 Units, again
 
 The card is placed in **logical** points against the main monitor's frame,
 converted with *that monitor's* scale factor — `checkpoint::main_monitor_frame`,
@@ -112,6 +133,10 @@ window by the window's own scale factor, which is the bug behind issue #20.
 - **The overlay is a window, so a genuinely full-screen app can cover it.** It
   joins all Spaces and re-asserts always-on-top whenever it is shown, which
   covers ordinary Space switching; a native full-screen Space is macOS's call.
+- **A break is not idle, though it has no task.** The card's "nothing running"
+  test is `Idle`, or no task *and* no break — break blocks deliberately carry
+  no task (SPEC), and testing `!task` alone showed today's idle total in place
+  of the break countdown (issue #27).
 - **Idle is shown as today's total, refreshed on the store's 10s stopped-state
   poll**, not interpolated. The number moves in minutes, so a second-accurate
   idle clock would be precision the figure does not have.

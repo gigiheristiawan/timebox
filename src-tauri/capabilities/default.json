@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the app's windows. Deliberately narrow: no filesystem, no shell, no SQL.",
-  "windows": ["main", "checkpoint", "popover"],
+  "description": "Capabilities for the app's windows. Deliberately narrow: no filesystem, no shell, no SQL. Every window label the app builds must be listed here: a window left out still runs its own #[tauri::command]s, which need no permission, but is refused the core ones — including event listen, so it receives no timebox://changed and freezes on the snapshot it mounted with (issue #27).",
+  "windows": ["main", "checkpoint", "popover", "settings", "overlay"],
   "permissions": [
     "core:default",
     "core:window:allow-set-size",
