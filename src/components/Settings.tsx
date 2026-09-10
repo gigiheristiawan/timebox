@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useTimebox } from "../stores/useTimebox";
-import type { Settings as SettingsData, Theme } from "../ipc/types";
+import type { OverlayPosition, Settings as SettingsData, Theme } from "../ipc/types";
 import { MIN } from "../core/format";
 import { SectionLabel } from "./ui";
 
@@ -9,6 +9,15 @@ const BREAK_CHOICES = [5, 10, 15, 30];
 const HOUR = 60 * MIN;
 /** Monday = bit 0, matching the stored bitmask. */
 const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
+/** The overlay's five anchors (issue #23). Not free coordinates: the window
+ *  ignores the cursor, so it can never be dragged into place. */
+const OVERLAY_POSITIONS: [OverlayPosition, string][] = [
+  ["TopLeft", "Top left"],
+  ["TopRight", "Top right"],
+  ["BottomLeft", "Bottom left"],
+  ["BottomRight", "Bottom right"],
+  ["Center", "Center"],
+];
 
 /**
  * The settings window (SPEC §4.4, task 7.4). Every change writes immediately —
@@ -117,6 +126,64 @@ export function Settings() {
           on={s.systemNotification}
           onChange={(v) => set({ systemNotification: v })}
         />
+      </div>
+
+      <div className="flex flex-col gap-[9px]">
+        <SectionLabel>Timer overlay</SectionLabel>
+        {/* A floating card over whatever you are working in. Read-only: it
+            ignores the cursor entirely, so everything about it is decided
+            here (TIMER_OVERLAY D48). */}
+        <Toggle
+          label="Show the timer overlay"
+          on={s.overlayShow}
+          onChange={(v) => set({ overlayShow: v })}
+          note={
+            s.overlayShow
+              ? "Floats above your other windows on the main display. It hides itself while a checkpoint is open."
+              : undefined
+          }
+        />
+        {s.overlayShow && (
+          <>
+            <Toggle
+              label="Show the task title"
+              on={s.overlayShowTaskTitle}
+              onChange={(v) => set({ overlayShowTaskTitle: v })}
+            />
+            <Row label="Position">
+              <select
+                className="field"
+                aria-label="Overlay position"
+                value={s.overlayPosition}
+                onChange={(e) => set({ overlayPosition: e.target.value as OverlayPosition })}
+              >
+                {OVERLAY_POSITIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Opacity">
+              <span className="flex items-center gap-2">
+                <input
+                  type="range"
+                  aria-label="Overlay opacity"
+                  className="w-[130px] accent-accent"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={s.overlayOpacityPct}
+                  onChange={(e) => set({ overlayOpacityPct: Number(e.target.value) })}
+                />
+                <span className="tabular w-[34px] text-right font-mono text-[11px] text-ink-3">
+                  {s.overlayOpacityPct}%
+                </span>
+              </span>
+            </Row>
+            <p className="text-[11.5px] leading-snug text-ink-3">
+              0% is fully transparent — the card disappears without switching the overlay off.
+            </p>
+          </>
+        )}
       </div>
 
       <div className="flex flex-col gap-[9px]">

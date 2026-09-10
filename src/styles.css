@@ -54,6 +54,9 @@
   /* The popover is a floating card, not a page: the window behind its rounded
      corners must show nothing at all. */
   body[data-surface="popover"] { @apply bg-transparent; }
+  /* Same reasoning for the overlay: it is a card floating over another app's
+     window, and everything outside its rounded corners must show that app. */
+  body[data-surface="overlay"] { @apply bg-transparent; }
   /* The main window is a document surface, not the desktop behind one — this is
      `.win` in docs/mockup.html, which paints `--surface`. */
   body[data-surface="main"] { @apply bg-surface; }

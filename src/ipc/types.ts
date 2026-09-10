@@ -55,6 +55,8 @@ export interface MachineState {
 }
 
 export type Theme = "System" | "Light" | "Dark";
+export type OverlayPosition =
+  | "TopLeft" | "TopRight" | "BottomLeft" | "BottomRight" | "Center";
 
 /** SPEC §4.4. Durations are milliseconds like everything else on the wire. */
 export interface Settings {
@@ -76,6 +78,14 @@ export interface Settings {
   workEndMs: number;
   /** Which weekdays the window applies to. Bitmask, Monday = bit 0. */
   workingWeekdays: number;
+  /** The floating timer overlay (issue #23). Presentation only — where the
+   *  window sits and how solid it looks are applied in Rust; the UI only
+   *  paints the card. `overlayOpacityPct` is whole percent, and 0 really is
+   *  invisible: it is the window's alpha. */
+  overlayShow: boolean;
+  overlayShowTaskTitle: boolean;
+  overlayPosition: OverlayPosition;
+  overlayOpacityPct: number;
 }
 
 /** All computed by `core::summary` in Rust. The UI formats these; it does not

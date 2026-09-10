@@ -31,6 +31,39 @@ impl Theme {
     }
 }
 
+/// Where the overlay sits on the main display (issue #23). A corner or the
+/// centre — not free coordinates: the window cannot be dragged (it ignores the
+/// cursor, D48), so a stored position has to be one the user can name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum OverlayPosition {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    Center,
+}
+
+impl OverlayPosition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OverlayPosition::TopLeft => "TOP_LEFT",
+            OverlayPosition::TopRight => "TOP_RIGHT",
+            OverlayPosition::BottomLeft => "BOTTOM_LEFT",
+            OverlayPosition::BottomRight => "BOTTOM_RIGHT",
+            OverlayPosition::Center => "CENTER",
+        }
+    }
+    fn parse(s: &str) -> Self {
+        match s {
+            "TOP_LEFT" => OverlayPosition::TopLeft,
+            "TOP_RIGHT" => OverlayPosition::TopRight,
+            "BOTTOM_LEFT" => OverlayPosition::BottomLeft,
+            "CENTER" => OverlayPosition::Center,
+            _ => OverlayPosition::BottomRight,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -56,6 +89,16 @@ pub struct Settings {
     pub work_end_ms: Millis,
     /// Which weekdays the window applies to. Bitmask, Monday = bit 0.
     pub working_weekdays: u8,
+
+    /// The floating timer overlay (issue #23). Presentation only: it shows the
+    /// state, offers no control, and no value here changes whether a
+    /// checkpoint appears.
+    pub overlay_show: bool,
+    pub overlay_show_task_title: bool,
+    pub overlay_position: OverlayPosition,
+    /// Whole percent. Applied as the window's alpha, so 0 is invisible — the
+    /// slider the user reads says so.
+    pub overlay_opacity_pct: u8,
 }
 
 impl Default for Settings {
@@ -73,6 +116,10 @@ impl Default for Settings {
             work_start_ms: 9 * 3_600_000,
             work_end_ms: 18 * 3_600_000,
             working_weekdays: 0b001_1111,
+            overlay_show: false,
+            overlay_show_task_title: true,
+            overlay_position: OverlayPosition::BottomRight,
+            overlay_opacity_pct: 85,
         }
     }
 }
@@ -87,6 +134,7 @@ impl Settings {
         self.work_start_ms = self.work_start_ms.clamp(0, DAY_MS - MINUTE_MS);
         self.work_end_ms = self.work_end_ms.clamp(MINUTE_MS, DAY_MS);
         self.working_weekdays &= 0b111_1111;
+        self.overlay_opacity_pct = self.overlay_opacity_pct.min(100);
         // Overnight windows are out of scope (IDLE_TIME §8) and `update_settings`
         // refuses them. A row that carries one anyway — hand-edited, or written
         // by a future version — would make every day report a negative window,
@@ -117,12 +165,14 @@ pub fn load(conn: &Connection) -> rusqlite::Result<Settings> {
         "SELECT launch_at_login, theme, default_block_duration_ms, default_break_duration_ms,
                 expiration_sound, system_notification, available_work_minutes_per_day,
                 menu_bar_show_timer, first_run_done,
-                work_start_minutes, work_end_minutes, working_weekdays
+                work_start_minutes, work_end_minutes, working_weekdays,
+                overlay_show, overlay_show_task_title, overlay_position, overlay_opacity_pct
          FROM settings WHERE id = 1",
         [],
         |r| {
             let theme: String = r.get(1)?;
             let minutes: i64 = r.get(6)?;
+            let overlay_position: String = r.get(14)?;
             Ok(Settings {
                 launch_at_login: r.get::<_, i64>(0)? != 0,
                 theme: Theme::parse(&theme),
@@ -136,6 +186,10 @@ pub fn load(conn: &Connection) -> rusqlite::Result<Settings> {
                 work_start_ms: r.get::<_, i64>(9)? * MINUTE_MS,
                 work_end_ms: r.get::<_, i64>(10)? * MINUTE_MS,
                 working_weekdays: r.get::<_, i64>(11)? as u8,
+                overlay_show: r.get::<_, i64>(12)? != 0,
+                overlay_show_task_title: r.get::<_, i64>(13)? != 0,
+                overlay_position: OverlayPosition::parse(&overlay_position),
+                overlay_opacity_pct: r.get::<_, i64>(15)? as u8,
             })
         },
     )?;
@@ -150,7 +204,9 @@ pub fn save(conn: &Connection, s: &Settings) -> rusqlite::Result<Settings> {
                              system_notification=?6, available_work_minutes_per_day=?7,
                              menu_bar_show_timer=?8, first_run_done=?9,
                              work_start_minutes=?10, work_end_minutes=?11,
-                             working_weekdays=?12
+                             working_weekdays=?12, overlay_show=?13,
+                             overlay_show_task_title=?14, overlay_position=?15,
+                             overlay_opacity_pct=?16
          WHERE id = 1",
         params![
             s.launch_at_login as i64,
@@ -169,6 +225,10 @@ pub fn save(conn: &Connection, s: &Settings) -> rusqlite::Result<Settings> {
             s.work_start_ms / MINUTE_MS,
             s.work_end_ms / MINUTE_MS,
             s.working_weekdays as i64,
+            s.overlay_show as i64,
+            s.overlay_show_task_title as i64,
+            s.overlay_position.as_str(),
+            s.overlay_opacity_pct as i64,
         ],
     )?;
     Ok(s)
@@ -202,6 +262,10 @@ mod tests {
             work_start_ms: 8 * 3_600_000 + 30 * 60_000,
             work_end_ms: 17 * 3_600_000,
             working_weekdays: 0b011_1111,
+            overlay_show: true,
+            overlay_show_task_title: false,
+            overlay_position: OverlayPosition::Center,
+            overlay_opacity_pct: 40,
         };
         db.with(|c| save(c, &want)).unwrap();
         assert_eq!(db.with(load).unwrap(), want);
@@ -225,6 +289,71 @@ mod tests {
         let saved = db.with(|c| save(c, &bad)).unwrap();
         assert_eq!(saved.work_start_ms, Settings::default().work_start_ms);
         assert_eq!(saved.work_end_ms, Settings::default().work_end_ms);
+    }
+
+    /// Test 102. The overlay is off for an existing install and the slider is
+    /// where the default puts it. A window that appeared over everything on
+    /// upgrade would be a surprise, and this one cannot be clicked away —
+    /// closing it means finding the setting (D48).
+    #[test]
+    fn t102_the_overlay_is_off_until_it_is_asked_for() {
+        let db = Db::in_memory().unwrap();
+        let s = db.with(load).unwrap();
+        assert!(!s.overlay_show, "migration 007 must upgrade to the overlay off");
+        assert!(s.overlay_show_task_title);
+        assert_eq!(s.overlay_position, OverlayPosition::BottomRight);
+        assert_eq!(s.overlay_opacity_pct, 85);
+    }
+
+    /// Test 103. The percentage is applied as the window's alpha, and AppKit
+    /// takes any float — a stored 250 would be silently meaningless rather than
+    /// rejected, so it is clamped on the way in and on the way out.
+    #[test]
+    fn t103_an_out_of_range_opacity_is_clamped_rather_than_passed_to_appkit() {
+        let db = Db::in_memory().unwrap();
+        let bad = Settings { overlay_opacity_pct: 250, ..Settings::default() };
+        assert_eq!(db.with(|c| save(c, &bad)).unwrap().overlay_opacity_pct, 100);
+        assert_eq!(db.with(load).unwrap().overlay_opacity_pct, 100);
+    }
+
+    /// Test 104. `BOTTOM_RIGHT` is what the *database* stores, `BottomRight`
+    /// what the UI sends — the same deliberate split as `Theme` and
+    /// `TimerState`. Both encodings are load-bearing and neither fails loudly:
+    /// a mismatch would just park the card in the default corner forever.
+    #[test]
+    fn t104_the_position_encodings_are_the_database_one_and_the_wire_one() {
+        for (p, sql, wire) in [
+            (OverlayPosition::TopLeft, "TOP_LEFT", r#""TopLeft""#),
+            (OverlayPosition::TopRight, "TOP_RIGHT", r#""TopRight""#),
+            (OverlayPosition::BottomLeft, "BOTTOM_LEFT", r#""BottomLeft""#),
+            (OverlayPosition::BottomRight, "BOTTOM_RIGHT", r#""BottomRight""#),
+            (OverlayPosition::Center, "CENTER", r#""Center""#),
+        ] {
+            assert_eq!(p.as_str(), sql);
+            assert_eq!(OverlayPosition::parse(sql), p);
+            assert_eq!(serde_json::to_string(&p).unwrap(), wire);
+            let back: OverlayPosition = serde_json::from_str(wire).unwrap();
+            assert_eq!(back, p);
+        }
+    }
+
+    /// Test 105. Every position must survive the round trip — the CHECK in 007
+    /// enumerates them, so a value the enum knows and the column does not fails
+    /// at runtime, not at compile time (the lesson of migration 006).
+    #[test]
+    fn t105_every_position_is_accepted_by_the_column() {
+        let db = Db::in_memory().unwrap();
+        for p in [
+            OverlayPosition::TopLeft,
+            OverlayPosition::TopRight,
+            OverlayPosition::BottomLeft,
+            OverlayPosition::BottomRight,
+            OverlayPosition::Center,
+        ] {
+            let want = Settings { overlay_position: p, ..Settings::default() };
+            db.with(|c| save(c, &want)).unwrap();
+            assert_eq!(db.with(load).unwrap().overlay_position, p);
+        }
     }
 
     #[test]

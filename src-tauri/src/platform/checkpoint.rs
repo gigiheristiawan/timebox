@@ -88,7 +88,8 @@ fn show(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /// The frame of the main display, in **logical** points, falling back to the
-/// one under the cursor.
+/// one under the cursor. Shared with `platform::overlay`, which anchors to the
+/// same display for the same reason and must not re-derive the units.
 ///
 /// The cursor's display was the original rule (SPEC §8) on the argument that it
 /// is where the user is looking. It is not, reliably: the pointer is wherever
@@ -106,7 +107,7 @@ fn show(app: &AppHandle) -> tauri::Result<()> {
 /// is how the window came out twice the screen with its content centred off the
 /// bottom-right corner. Converting here and passing logical makes their
 /// conversion an identity, so only the monitor's own factor is ever used.
-fn main_monitor_frame(app: &AppHandle) -> Option<(LogicalPosition<f64>, LogicalSize<f64>)> {
+pub(crate) fn main_monitor_frame(app: &AppHandle) -> Option<(LogicalPosition<f64>, LogicalSize<f64>)> {
     let monitor = app
         .primary_monitor()
         .ok()
