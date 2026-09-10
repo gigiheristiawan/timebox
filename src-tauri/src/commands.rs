@@ -193,6 +193,7 @@ pub fn dispatch(
 ) -> AppResult<Snapshot> {
     let fx = app.dispatch(action.into(), now_ms())?;
     crate::platform::checkpoint::apply(&handle, &fx, &app.settings());
+    crate::platform::overlay::reconcile(&handle, &app.settings(), &app.snapshot());
     crate::platform::tray::refresh(&handle, &app.snapshot(), now_ms());
     let _ = tauri::Emitter::emit(&handle, "timebox://changed", ());
     Ok(snapshot_of(&app))
@@ -236,6 +237,10 @@ pub fn update_settings(
 
     crate::platform::tray::set_show_timer(stored.menu_bar_show_timer);
     crate::platform::tray::refresh_forced(&handle, &app.snapshot(), now_ms());
+    // The overlay is four of these settings, so the write is what opens it,
+    // closes it, moves it and fades it. Doing it here rather than in the UI
+    // keeps the window entirely a consequence of stored state.
+    crate::platform::overlay::reconcile(&handle, &stored, &app.snapshot());
     apply_launch_at_login(&handle, stored.launch_at_login);
 
     let _ = tauri::Emitter::emit(&handle, "timebox://changed", ());
@@ -291,7 +296,9 @@ pub fn open_settings_window(handle: tauri::AppHandle) -> Result<(), String> {
             tauri::WebviewUrl::App("index.html".into()),
         )
         .title("Settings")
-        .inner_size(376.0, 460.0)
+        // Taller since the overlay section (issue #23); the window does not
+        // resize, so a section that did not fit would simply be unreachable.
+        .inner_size(376.0, 560.0)
         .resizable(false)
         .maximizable(false)
         .build()

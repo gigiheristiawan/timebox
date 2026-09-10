@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { Checkpoint } from "./components/Checkpoint";
+import { Overlay } from "./components/Overlay";
 import { Popover } from "./components/Popover";
 import { Settings } from "./components/Settings";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -13,6 +14,7 @@ document.body.dataset.surface = label;
 
 const surface = {
   checkpoint: <Checkpoint />,
+  overlay: <Overlay />,
   popover: <Popover />,
   settings: <Settings />,
 }[label] ?? <App />;

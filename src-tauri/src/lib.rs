@@ -49,6 +49,11 @@ pub fn run() {
             }
 
             platform::tray::init(app.handle())?;
+            // Opened here rather than lazily on the first tick: the setting is
+            // on or off at launch, and a timer overlay that only appears once
+            // something starts running would miss the state it is most useful
+            // in — nothing running, and no reminder of it (D47).
+            platform::overlay::reconcile(app.handle(), &state.settings(), &state.snapshot());
             platform::tray::refresh(app.handle(), &state.snapshot(), state::now_ms());
 
             // Closing the main window hides it; the app lives in the menu bar
@@ -81,6 +86,11 @@ pub fn run() {
             state.start_ticking(move |fx| {
                 platform::checkpoint::apply(&ticker_handle, fx, &app_state.settings());
                 platform::tray::refresh(&ticker_handle, &app_state.snapshot(), state::now_ms());
+                platform::overlay::reconcile(
+                    &ticker_handle,
+                    &app_state.settings(),
+                    &app_state.snapshot(),
+                );
                 let _ = ticker_handle.emit("timebox://changed", ());
             });
 
