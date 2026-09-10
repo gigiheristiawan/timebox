@@ -15,11 +15,29 @@ export function CurrentPanel() {
   const onBreak = isBreak(snap);
   const paused = snap.state.timerState === "Paused";
   const nextId = snap.state.queue[0];
+  // Issue #22, matching the popover: the current block sits on a tinted band, so
+  // "is something running, and what kind" is answered before a word is read. At
+  // either checkpoint it stays plain — `PendingDecision` above it is the colour
+  // there, and a second tinted panel under it would compete with the one thing
+  // that must be seen.
+  const atCheckpoint =
+    snap.state.timerState === "AwaitingDecision" || snap.state.timerState === "AwaitingPomodoro";
+  const tint = atCheckpoint
+    ? ""
+    : onBreak
+      ? "bg-rest-soft"
+      : block && task
+        ? (paused ? "bg-surface-2" : "bg-accent-soft")
+        : "";
+  // Full-bleed rather than an inset card: the window pads by `px-5`, and an
+  // indented panel would leave CURRENT TASK out of line with every other
+  // section label under it.
+  const PANEL = `-mx-5 flex flex-col gap-3 px-5 py-3.5 transition-colors ${tint}`;
 
   if (onBreak && block) {
     const next = nextId ? taskById(snap, nextId) : undefined;
     return (
-      <section className="flex flex-col gap-3">
+      <section className={PANEL}>
         <SectionLabel>On a break</SectionLabel>
         <div className="flex items-start gap-[14px]">
           <div className="flex flex-col gap-[7px]">
@@ -45,7 +63,7 @@ export function CurrentPanel() {
   if (!task || !block) {
     const next = nextId ? taskById(snap, nextId) : undefined;
     return (
-      <section className="flex flex-col gap-3">
+      <section className={PANEL}>
         <SectionLabel>Current task</SectionLabel>
         <p className="text-sm text-ink-3">
           {next ? "Nothing running. Start the top of the queue whenever you are ready." : "Queue is empty. Add a task to plan the day."}
@@ -64,7 +82,7 @@ export function CurrentPanel() {
   const blockNumber = snap.state.blocks.filter((b) => b.taskId === task.id).length;
 
   return (
-    <section className="flex flex-col gap-3">
+    <section className={PANEL}>
       <SectionLabel>Current task</SectionLabel>
       <div className="flex items-start gap-[14px]">
         <div className="flex min-w-0 flex-1 flex-col gap-[7px]">
