@@ -15,7 +15,7 @@ pub const LABEL: &str = "popover";
 
 /// Matches `.popover` in docs/mockup.html. The height is a first-paint estimate
 /// only — the card measures itself and resizes the window to fit its content.
-const WIDTH: f64 = 300.0;
+const WIDTH: f64 = 380.0;
 const HEIGHT: f64 = 360.0;
 /// Breathing room between the menu bar and the popover's top edge.
 const GAP: f64 = 6.0;
