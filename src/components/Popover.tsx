@@ -7,7 +7,7 @@ import { Countdown, PomodoroCountdown } from "./Countdown";
 import { DailyBadge, PriorityDot } from "./ui";
 
 /** Matches `.popover` in docs/mockup.html — the design reference for this window. */
-const WIDTH = 300;
+const WIDTH = 380;
 /** How much of the queue fits before the popover becomes a second app. */
 const QUEUE_PREVIEW = 5;
 /** The same lengths the checkpoint offers, so a break is one control wherever
