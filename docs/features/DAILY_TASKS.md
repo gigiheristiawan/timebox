@@ -21,6 +21,7 @@ Status: **implemented** (issue
 
 | Date (WIB)       | Change                                                                                  |
 | ---------------- | --------------------------------------------------------------------------------------- |
+| 2026-09-14 14:03 | **The popover lists dailies done today last (issue #31).** Its preview is five rows, and ticked dailies at the top of the queue pushed open work out of it. `core::queue::done_last` builds `Snapshot.popoverQueue` — `state.queue` with `doneToday` moved below, each group in stored order. A **view only**: the stored queue is not reordered, so a daily keeps its dragged place tomorrow and a task added later still lists above it. The main window keeps `state.queue`, where order is dragged. §2.1, §5, §5.2; test 107. |
 | 2026-09-04 10:55 | Initial version. D23–D26; migration 005; acceptance tests 54–60.                          |
 
 ---
@@ -132,7 +133,8 @@ Today.
   drag-to-start are all inert — the backend refuses the switch either way, so
   the row says so rather than looking live and doing nothing.
 - **Popover** lists it the same way: still present, ticked, disabled. Seeing the
-  dailies you have already done is the point of keeping them in the queue.
+  dailies you have already done is the point of keeping them in the queue. It
+  lists them **below** every open task, though (§5.2).
 - **Rotation** omits it. The strip is what is *left* to do.
 
 ### 5.1 `Snapshot.doneToday`
@@ -140,6 +142,19 @@ Today.
 The set of task ids done for today is computed in Rust and carried on the
 snapshot, beside `summary`. The UI never compares `completedAt` against a date
 of its own — SPEC R7.
+
+### 5.2 `Snapshot.popoverQueue` (issue #31)
+
+The popover previews only the first five queue rows, so dailies ticked off near
+the head crowded out the work still to do. `popoverQueue` is `state.queue` with
+the `doneToday` ids moved to the bottom, each group keeping its stored order
+(`core::queue::done_last`).
+
+It is a view, not a reorder. Moving the daily in the stored queue on completion
+would contradict §2.1 — it would still be at the bottom tomorrow — and would not
+even hold today: `AddTask` appends, so a task added after the tick would land
+beneath it and be cut off again. The main window's *Up next* keeps
+`state.queue`, because that is where the order is dragged.
 
 ---
 
@@ -170,6 +185,7 @@ except 61, which needs persistence and lives in `src/state/tests.rs`.
 | 59  | A daily counts once in `tasks_completed` and not in `tasks_pending`; tomorrow the two swap back (§6). |
 | 60  | Un-marking a daily completed earlier today clears `completed_at`, and it is outstanding again (§4.3). |
 | 61  | `daily` and `completed_at` survive a quit and relaunch; the task comes back queued, `Todo`, and still done for that day (§4.1). |
+| 107 | The popover's order lists dailies done today after every open task, each group in stored order, while `state.queue` itself is unchanged; with nothing done the view is the stored order (§5.2). |
 
 The wire encoding of `daily` on both `addTask` and `editTask` is pinned in
 `commands::tests`, for the reason the priority test exists: a wrong field name

@@ -36,6 +36,11 @@ pub struct Snapshot {
     /// here for the same reason `summary` is: local midnight is a shell
     /// concern, and the UI must not do date arithmetic of its own (SPEC R7).
     pub done_today: Vec<crate::core::model::TaskId>,
+    /// `state.queue` with `done_today` moved to the bottom — the popover's
+    /// order, so its short preview shows work still to do (issue #31). The
+    /// main window deliberately keeps `state.queue`: it is where the order is
+    /// dragged, and a view that moved rows would fight the drag.
+    pub popover_queue: Vec<crate::core::model::TaskId>,
     /// Pomodoro mode, or `None` when it is off (issue #15). `remainingMs` is
     /// computed here for the same reason `summary` is: the UI must not sum
     /// spans or compare instants of its own (SPEC R7), and it never concludes
@@ -59,7 +64,15 @@ fn snapshot_of(app: &App) -> Snapshot {
     let launch_at_login_active = settings.launch_at_login;
 
     let day_start = day_start_ms(now);
+    let done_today: Vec<_> = state
+        .tasks
+        .iter()
+        .filter(|t| t.done_today(day_start))
+        .map(|t| t.id.clone())
+        .collect();
     Snapshot {
+        popover_queue: crate::core::queue::done_last(&state.queue, &done_today),
+        done_today,
         remaining_ms: state.remaining_ms(now),
         launch_at_login_active,
         staleness_ms: state.staleness_ms(now),
@@ -71,12 +84,6 @@ fn snapshot_of(app: &App) -> Snapshot {
             settings.available_work_ms_per_day,
             window_for(day_start, &settings),
         ),
-        done_today: state
-            .tasks
-            .iter()
-            .filter(|t| t.done_today(day_start))
-            .map(|t| t.id.clone())
-            .collect(),
         pomodoro: state
             .pomodoro_remaining_ms(now)
             .map(|remaining_ms| Pomodoro { remaining_ms }),
