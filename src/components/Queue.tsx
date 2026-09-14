@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { clockStr, durStr } from "../core/format";
 import { useTimebox, currentBlock, parkedFor, taskById } from "../stores/useTimebox";
-import { PriorityDot, SectionLabel } from "./ui";
+import { DailyBadge, PriorityDot, SectionLabel } from "./ui";
 import { TaskEditor } from "./TaskEditor";
 
 /**
@@ -104,14 +104,7 @@ export function Queue() {
                 <span className={`min-w-0 flex-1 truncate text-[13.5px] ${doneToday ? "line-through" : ""}`}>
                   {task.title}
                 </span>
-                {task.daily && (
-                  <span
-                    title="Recurs every day"
-                    className="shrink-0 rounded-[5px] bg-surface-3 px-[6px] py-[2px] font-mono text-[10px] uppercase tracking-wide text-ink-3"
-                  >
-                    daily
-                  </span>
-                )}
+                {task.daily && <DailyBadge />}
                 <span className={`font-mono text-[11.5px] ${left != null ? "font-medium text-warn" : "text-ink-2"}`}>
                   {left != null ? `${clockStr(left)} left` : durStr(task.blockDurationMs)}
                 </span>
