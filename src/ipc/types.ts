@@ -200,6 +200,9 @@ export interface Snapshot {
   /** Ids of daily tasks already ticked off for today. Computed in Rust because
    *  local midnight is a shell concern and the UI does no date arithmetic. */
   doneToday: string[];
+  /** `state.queue` with `doneToday` moved to the bottom — the popover's order
+   *  (issue #31). The main window keeps `state.queue`, where order is dragged. */
+  popoverQueue: string[];
   /** Pomodoro mode, or `null` when it is off (issue #15). `remainingMs` counts
    *  down 25 minutes of *running work*, so it parks whenever the task timer
    *  does. Interpolate it against `now` like the task countdown, and never

@@ -1300,6 +1300,34 @@ mod daily {
         assert_eq!(task(&s, "B").status, TaskStatus::Done);
     }
 
+    /// Test 107 — the popover lists a daily done today below everything still
+    /// to do, so its short preview is spent on open work (issue #31). It is a
+    /// view: the stored order is untouched, which is what keeps the daily in
+    /// its dragged place tomorrow and a task added later above it today.
+    #[test]
+    fn t107_popover_lists_dailies_done_today_last_without_reordering_the_queue() {
+        use crate::core::queue::done_last;
+        let (mut s, mut ids) = with_daily_a();
+        s.tasks.iter_mut().find(|t| t.id == "C").unwrap().daily = true;
+        let s = fire(s, Event::SwitchTo { task: "C".into() }, 0, &mut ids);
+        let s = fire(s, Event::CompleteCurrentTask, MIN, &mut ids);
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 2 * MIN, &mut ids);
+        let s = fire(s, Event::CompleteCurrentTask, 3 * MIN, &mut ids);
+        let stored = s.queue.clone();
+
+        let done: Vec<_> = s.tasks.iter().filter(|t| t.done_today(0)).map(|t| t.id.clone()).collect();
+        let view = done_last(&s.queue, &done);
+
+        let open: Vec<_> = stored.iter().filter(|t| !done.contains(t)).cloned().collect();
+        let ticked: Vec<_> = stored.iter().filter(|t| done.contains(t)).cloned().collect();
+        assert!(ticked.len() == 2 && ticked.len() < stored.len(), "fixture: two done among open");
+        assert_eq!(view, [open, ticked].concat(), "open first, done last, each in stored order");
+        assert_eq!(s.queue, stored, "the stored queue is not reordered");
+
+        // Tomorrow nothing is done, so the view is the stored order again.
+        assert_eq!(done_last(&s.queue, &[]), stored);
+    }
+
     /// Test 55 — done for today means *inert*, not merely deprioritised.
     /// Rotation must step over it, or completing the queue head would restart
     /// the task that was just ticked off.

@@ -234,7 +234,8 @@ export function Popover() {
       <section className={`border-t border-line ${SECTION}`}>
         <div className={LABEL}>Today&apos;s tasks</div>
         {queue.length === 0 && <p className="py-1 text-[12.5px] text-ink-3">Queue empty</p>}
-        {queue.slice(0, QUEUE_PREVIEW).map((id) => {
+        {/* Issue #31: done dailies listed last, so the preview shows open work. */}
+        {(snap?.popoverQueue ?? []).slice(0, QUEUE_PREVIEW).map((id) => {
           const t = taskById(snap ?? null, id);
           if (!t) return null;
           const current = block?.taskId === id && state !== "Idle";

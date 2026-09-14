@@ -37,6 +37,16 @@ pub fn move_before(queue: &mut Vec<TaskId>, moved: &TaskId, before: &TaskId) {
     queue.insert(at.min(queue.len()), moved.clone());
 }
 
+/// The queue as the popover lists it: tasks in `done` moved below the rest,
+/// each group keeping its own order (issue #31). A *view*, never written back —
+/// moving a daily in the stored queue would keep it at the bottom tomorrow, and
+/// a task added after it would land beneath it and be cut off all the same.
+pub fn done_last(queue: &[TaskId], done: &[TaskId]) -> Vec<TaskId> {
+    let (done_rows, open): (Vec<TaskId>, Vec<TaskId>) =
+        queue.iter().cloned().partition(|t| done.contains(t));
+    open.into_iter().chain(done_rows).collect()
+}
+
 pub fn head(queue: &[TaskId]) -> Option<&TaskId> {
     queue.first()
 }
