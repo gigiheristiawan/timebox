@@ -4,7 +4,7 @@ import { clockStr, durStr } from "../core/format";
 import { openMainWindow, openSettingsWindow, requestQuit } from "../ipc/commands";
 import { breakDefaultMs, currentBlock, currentTask, isBreak, parkedFor, taskById, useTimebox } from "../stores/useTimebox";
 import { Countdown, PomodoroCountdown } from "./Countdown";
-import { PriorityDot } from "./ui";
+import { DailyBadge, PriorityDot } from "./ui";
 
 /** Matches `.popover` in docs/mockup.html — the design reference for this window. */
 const WIDTH = 300;
@@ -259,6 +259,7 @@ export function Popover() {
               <span className="w-3 flex-none text-accent">{done ? "✓" : current ? "→" : ""}</span>
               <PriorityDot priority={t.priority} />
               <span className={`truncate ${done ? "line-through" : ""}`}>{t.title}</span>
+              {t.daily && <DailyBadge className="px-[5px] py-px text-[9px]" />}
               <span className="tabular ml-auto flex-none pl-2 font-mono text-[11px] text-ink-3">
                 {done ? "today"
                   : parked?.remainingWhenPausedMs != null

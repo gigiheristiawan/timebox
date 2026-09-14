@@ -67,3 +67,19 @@ export function PriorityDot({ priority }: { priority: Priority }) {
     />
   );
 }
+
+/**
+ * The daily-task marker, shared by the queue, the popover and the overlay
+ * (issue #33) so a daily reads as one kind of task wherever it appears.
+ * `className` carries only size and spacing; the look is fixed here.
+ */
+export function DailyBadge({ className = "px-[6px] py-[2px] text-[10px]" }: { className?: string }) {
+  return (
+    <span
+      title="Recurs every day"
+      className={`shrink-0 rounded-[5px] bg-surface-3 font-mono uppercase tracking-wide text-ink-3 ${className}`}
+    >
+      daily
+    </span>
+  );
+}

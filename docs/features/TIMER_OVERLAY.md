@@ -22,6 +22,7 @@ Status: **implemented** (issue
 
 | Date (WIB)       | Change                                                            |
 | ---------------- | ----------------------------------------------------------------- |
+| 2026-09-14 15:13 | **A running daily carries its `daily` chip beside the title (issue #33).** Same line as the title, which truncates first, so D51's fixed height holds; hidden with the title. §3. |
 | 2026-09-10 11:35 | **A running break read as idle (issue #27).** A break block carries no task, and `!task` was the card's whole test for *nothing running*, so it painted today's idle total over the break countdown. §5. |
 | 2026-09-10 11:27 | **The card never updated (issue #27).** `overlay` was missing from `capabilities/default.json`, so the window was refused `event.listen` and never saw a `timebox://changed`. §3.1. |
 | 2026-09-10 09:55 | Initial version. D47–D52; migration 007; acceptance tests 102–106. |
@@ -86,7 +87,9 @@ has changed.
 `components/Overlay.tsx` paints the card and nothing else. The window's label
 routes it in `src/main.tsx` like every other surface, and the countdown is the
 shared `Countdown` component, so the overlay cannot disagree with the popover
-about the time remaining.
+about the time remaining. A running daily shows the shared `DailyBadge` on the
+title line (issue #33) — never a row of its own, which D51's fixed height has no
+room for.
 
 ### 3.1 The capability list
 

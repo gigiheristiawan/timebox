@@ -21,6 +21,7 @@ Status: **implemented** (issue
 
 | Date (WIB)       | Change                                                                                  |
 | ---------------- | --------------------------------------------------------------------------------------- |
+| 2026-09-14 15:13 | **The `daily` chip now shows on the popover's task list and the overlay (issue #33)**, not only in the main window's queue. Extracted to `DailyBadge` in `components/ui.tsx`. On the overlay it shares the title line, since the card's height is fixed. Presentation only. §5. |
 | 2026-09-14 14:03 | **The popover lists dailies done today last (issue #31).** Its preview is five rows, and ticked dailies at the top of the queue pushed open work out of it. `core::queue::done_last` builds `Snapshot.popoverQueue` — `state.queue` with `doneToday` moved below, each group in stored order. A **view only**: the stored queue is not reordered, so a daily keeps its dragged place tomorrow and a task added later still lists above it. The main window keeps `state.queue`, where order is dragged. §2.1, §5, §5.2; test 107. |
 | 2026-09-04 10:55 | Initial version. D23–D26; migration 005; acceptance tests 54–60.                          |
 
@@ -132,9 +133,15 @@ Today.
   dimmed and struck through, its action reads `✓ today`, and click, `Enter` and
   drag-to-start are all inert — the backend refuses the switch either way, so
   the row says so rather than looking live and doing nothing.
-- **Popover** lists it the same way: still present, ticked, disabled. Seeing the
-  dailies you have already done is the point of keeping them in the queue. It
-  lists them **below** every open task, though (§5.2).
+- **Popover** lists it the same way: still present, ticked, disabled, with the
+  same `daily` chip (issue #33). Seeing the dailies you have already done is the
+  point of keeping them in the queue. It lists them **below** every open task,
+  though (§5.2).
+- **Overlay** puts the chip beside the task title while a daily runs, on the
+  title line itself — the card's height is fixed (TIMER_OVERLAY D51). With the
+  title hidden, the chip is hidden too.
+- The chip is one component, `DailyBadge` in `components/ui.tsx`, so the three
+  surfaces cannot drift apart.
 - **Rotation** omits it. The strip is what is *left* to do.
 
 ### 5.1 `Snapshot.doneToday`

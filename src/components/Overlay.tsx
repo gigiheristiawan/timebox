@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { durStr } from "../core/format";
 import { currentTask, isBreak, useTimebox } from "../stores/useTimebox";
 import { Countdown } from "./Countdown";
+import { DailyBadge } from "./ui";
 
 /**
  * The floating timer overlay (issue #23, `docs/features/TIMER_OVERLAY.md`).
@@ -46,6 +47,7 @@ export function Overlay() {
   // store refetches every 10s while the timer is stopped.
   const idleMs = snap?.summary.today.idleMs ?? 0;
   const sub = onBreak ? "Break time" : idle || !task ? "Nothing running" : task.title;
+  const showDaily = !onBreak && !idle && !!task?.daily;
 
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center overflow-hidden rounded-[12px] border border-line bg-surface px-3">
@@ -60,8 +62,11 @@ export function Overlay() {
         />
       )}
       {showTitle && (
-        <div className="mt-1.5 w-full truncate text-center text-[12px] text-ink-2" title={sub}>
-          {sub}
+        // The badge sits on the title line (issue #33): the card's height is
+        // fixed by Rust, so it must not add a row. Only the title truncates.
+        <div className="mt-1.5 flex w-full items-center justify-center gap-1.5 text-[12px] text-ink-2" title={sub}>
+          <span className="truncate">{sub}</span>
+          {showDaily && <DailyBadge className="px-[5px] py-px text-[9px] leading-[1.3]" />}
         </div>
       )}
     </div>
