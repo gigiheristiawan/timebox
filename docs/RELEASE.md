@@ -3,8 +3,8 @@
 How to produce a distributable TimeBox build. Phase 8 of
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Current state:** **0.1.0 through 0.5.1 are published**, and **0.5.2 is in
-flight** — version bumped (build 11), notes written; the signed/notarized build
+**Current state:** **0.1.0 through 0.5.2 are published**, and **0.5.3 is in
+flight** — version bumped (build 12), notes written; the signed/notarized build
 has not been made yet.
 The 0.1.0 DMG is attached to the [v0.1.0
 release](https://github.com/gigiheristiawan/timebox/releases/tag/v0.1.0) and the
@@ -18,6 +18,7 @@ Pages) is done and marked as such where it appears.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-09-16 13:58 | 0.5.3 bumped: the five files of §0 plus `CFBundleVersion` 11 → **12**. Notes in `docs/release-notes/0.5.3.md`. A one-fix release — the 1 Hz tick loop rewriting the whole database, nudging hidden windows and redrawing the countdown four times a second, none of which anything read (issue #36). No migration, and nothing the app shows changes. |
 | 2026-09-14 15:31 | 0.5.2 bumped: the five files of §0 plus `CFBundleVersion` 10 → **11**. Notes in `docs/release-notes/0.5.2.md`. Three presentation changes since 0.5.1 — dailies done today listed last in the popover (issue #31), the `daily` badge on the popover and the overlay (issue #33), and the popover widened to 380px. No migration. |
 | 2026-09-10 11:52 | 0.5.1 bumped: the five files of §0 plus `CFBundleVersion` 9 → **10**. Notes in `docs/release-notes/0.5.1.md`. A one-fix release — the timer overlay never updating after the block it mounted with, and a running break showing today's idle total where the break countdown belongs (issue #27). No migration. |
 | 2026-09-10 10:05 | 0.5.0 bumped: the five files of §0 plus `CFBundleVersion` 8 → **9**. Notes in `docs/release-notes/0.5.0.md`. Two features since 0.4.1 — the floating timer overlay (issue #23) and the tinted current block (issue #22). **Migration 007** ships with it, adding the four `settings.overlay_*` columns; the overlay arrives switched off. |
