@@ -9,6 +9,27 @@ use db::Db;
 use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+/// Nudge only the windows someone can actually see (issue #36).
+///
+/// Every `timebox://changed` costs the receiving webview a `get_snapshot` — the
+/// whole `MachineState` serialised, the summary recomputed over every span, and
+/// React re-rendering the tree. The tick loop sends one a second, and the
+/// windows are *hidden, never destroyed*, so the popover, the main window and
+/// the checkpoint were each paying that while showing nothing at all.
+///
+/// Only the 1 Hz loop filters. A hidden window is caught up by the broadcast on
+/// `Focused(true)` — every path that shows one focuses it — and by the 10s poll
+/// in `useTimebox` while the timer is stopped, so it can never be left showing
+/// a stale snapshot. The overlay takes no focus by design, but it is visible
+/// whenever it is open and so is never filtered out.
+fn emit_to_visible(app: &tauri::AppHandle) {
+    for window in app.webview_windows().values() {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.emit("timebox://changed", ());
+        }
+    }
+}
+
 /// SPEC §9. Registered app-wide so the popover is reachable without hunting for
 /// the menu bar icon, which the notch can hide entirely (D12).
 fn toggle_popover_shortcut() -> Shortcut {
@@ -91,7 +112,7 @@ pub fn run() {
                     &app_state.settings(),
                     &app_state.snapshot(),
                 );
-                let _ = ticker_handle.emit("timebox://changed", ());
+                emit_to_visible(&ticker_handle);
             });
 
             app.manage(state);

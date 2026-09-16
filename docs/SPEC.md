@@ -12,6 +12,7 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 
 | Date (WIB)       | Change                                                                                                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-16 13:41 | **§4.5, §6 — a no-op reduction is not persisted, and the 1 Hz nudge only reaches visible windows (issue #36).** Activity Monitor put the app at 13.3 Energy Impact while a block ran. Almost every tick changes nothing — `Event::Tick` mutates the state only on expiry or a Pomodoro falling due — yet `dispatch` rewrote every task, block and span in a transaction, 3600 times an hour, to store what was already there; and each `timebox://changed` cost *every* window a full `get_snapshot` and a whole-tree re-render, including the popover, the main window and the checkpoint while hidden. Neither changes a rule: a transition still writes before it is acknowledged, and a hidden window is caught up on focus. Test 108. |
 | 2026-09-14 15:26 | **§7.2 — the popover is 380px wide**, correcting the 340 below after a look at it running. |
 | 2026-09-14 15:22 | **§7.2 — the popover is 340px wide, up from 300**, so task titles truncate less. The stated "~320px" had drifted from the code's 300. Presentation only. |
 | 2026-09-14 14:03 | **§7.2 — the popover lists dailies done today last (issue #31)**, so its short preview shows work still to do. A view only: the stored queue is not reordered, and the main window's *Up next* keeps the stored order. `docs/features/DAILY_TASKS.md` §5.2. |
@@ -194,7 +195,7 @@ Durations and instants are stored in **milliseconds**, matching the domain core 
 
 Requirements:
 - All writes are synchronous and committed before the corresponding UI transition is acknowledged.
-- Every state-machine transition writes to SQLite in a single transaction.
+- Every state-machine transition writes to SQLite in a single transaction — and **only** a transition does (issue #36). `App::dispatch` compares the reduced state with the one it held and skips the save when they are equal, which is the case for almost every tick and for every rejected event. The requirement above is about transitions; a reduction that changed nothing is not one, and rewriting the whole state once a second to store what is already stored kept the disk awake all day for nothing.
 - WAL mode enabled; `synchronous=NORMAL`.
 - Forward-only numbered migrations run at startup.
 
@@ -264,6 +265,7 @@ No boolean flag soup. `isRunning`, `isPaused`, `hasExpired` etc. are derived, ne
 - Remaining time is always computed as `endAt - now`. Never decremented.
 - `endAt` is stored as an absolute UTC instant and persisted immediately on every start/resume/extend.
 - The Rust tick loop runs at 1 Hz while `RUNNING` and is suspended entirely in `IDLE`, `PAUSED`, and `AWAITING_DECISION` (zero background work when not running).
+- The 1 Hz `timebox://changed` nudge is sent **only to windows that are visible** (issue #36). Windows are hidden, never destroyed, so a broadcast made the popover, the main window and the checkpoint each serialise a whole snapshot and re-render their tree once a second while showing nothing. A hidden window is caught up by the broadcast on `Focused(true)` — every path that shows one focuses it — and by `useTimebox`'s 10s poll while the timer is stopped. The overlay takes no focus by design but is visible whenever it is open, so it is never filtered out.
 - On every tick, on window focus, on app resume, and on macOS wake, the app re-evaluates `now >= endAt`.
 - macOS sleep/wake: subscribe to `NSWorkspace.didWakeNotification`. On wake, immediately re-evaluate expiry before painting any UI. *(As built this is not subscribed to at all: the tick thread sleeps against wall time, so a wake produces a late tick that resolves expiry on its own. **Pending D21** that late tick gains a second job — a gap far exceeding the tick interval is evidence of sleep, and the block is parked at the instant the Mac went to sleep rather than credited with the gap. See `docs/features/SLEEP_DETECTION.md`.)*
 - On app launch, hydrate from SQLite and re-evaluate expiry **before** first render. A block whose persisted `endAt` is in the past resolves to `AWAITING_DECISION`, never to a running or reset timer.
