@@ -185,14 +185,25 @@ impl App {
 
     /// Reduce, persist, and apply the ticking effects — in that order, so a
     /// crash can never leave the UI ahead of the database (SPEC §4.5).
+    ///
+    /// A reduction that changed nothing is not persisted (issue #36). Almost
+    /// every tick is one: `Event::Tick` mutates the state only when the block
+    /// expires or a Pomodoro falls due, so the 1 Hz loop was rewriting every
+    /// task, block and span — a WAL transaction a second, all day — to store
+    /// what was already there. The only column that would have moved is
+    /// `app_state.updated_at`, which nothing reads. Equality is tested rather
+    /// than the event, so every no-op event benefits and no rule decides which:
+    /// a rejected `SwitchTo` at a checkpoint writes nothing either.
     pub fn dispatch(&self, event: Event, now: Millis) -> AppResult<Vec<Effect>> {
         let mut guard = self.machine.lock();
         let (next, fx) = {
             let mut ids = self.ids.lock();
             reduce(guard.clone(), event, now, day_start_ms(now), &mut *ids)
         };
-        self.db.with_mut(|c| repo::save(c, &next, now))?;
-        *guard = next;
+        if next != *guard {
+            self.db.with_mut(|c| repo::save(c, &next, now))?;
+            *guard = next;
+        }
         drop(guard);
 
         for e in &fx {

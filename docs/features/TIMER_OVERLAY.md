@@ -24,6 +24,7 @@ Status: **implemented** (issue
 | ---------------- | ----------------------------------------------------------------- |
 | 2026-09-14 15:13 | **A running daily carries its `daily` chip beside the title (issue #33).** Same line as the title, which truncates first, so D51's fixed height holds; hidden with the title. §3. |
 | 2026-09-10 11:35 | **A running break read as idle (issue #27).** A break block carries no task, and `!task` was the card's whole test for *nothing running*, so it painted today's idle total over the break countdown. §5. |
+| 2026-09-16 13:41 | **The 1 Hz nudge now goes only to *visible* windows (issue #36)** — the broadcast was costing every hidden window a full snapshot and re-render each second. The overlay is unaffected: it takes no focus, but it is visible whenever it is open, and `emit_to_visible` filters on visibility, not focus. §3.1. |
 | 2026-09-10 11:27 | **The card never updated (issue #27).** `overlay` was missing from `capabilities/default.json`, so the window was refused `event.listen` and never saw a `timebox://changed`. §3.1. |
 | 2026-09-10 09:55 | Initial version. D47–D52; migration 007; acceptance tests 102–106. |
 
@@ -101,6 +102,11 @@ snapshot and paints correctly, and then never changes again: `listen` is a
 That was issue #27. The card looked alive because `Countdown` interpolates
 locally, so it counted its first block down to 00:00 and stayed there, through
 breaks, switches and checkpoints alike.
+
+Since issue #36 the tick loop's emit reaches **only visible windows**, which is
+not a second way for the card to go quiet: the overlay is hidden exactly when it
+is meant to be — at either checkpoint (D49) — and `emit_to_visible` tests
+visibility, not focus, which the overlay never takes.
 
 Nothing in the failure is visible from Rust: the emit succeeds, the window is
 there, and the only signal is a rejected promise in a webview with no console

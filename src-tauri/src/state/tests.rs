@@ -438,3 +438,44 @@ fn t91_consecutive_weeks_tile_with_no_gap_and_no_overlap() {
         );
     }
 }
+
+/// Test 108 — a reduction that changed nothing must not touch the database
+/// (issue #36).
+///
+/// This is an energy invariant, not a cosmetic one. The tick loop dispatches
+/// once a second for as long as a block runs, and `repo::save` rewrites every
+/// task, block and span in a transaction; at 3600 no-op writes an hour the disk
+/// never settles. `updated_at` is the witness because it is the one column a
+/// save moves even when the state is identical — if it advanced across a tick
+/// that expired nothing, a write happened.
+#[test]
+fn t108_a_tick_that_changes_nothing_writes_nothing() {
+    let updated_at = |db: &Db| -> Millis {
+        db.with(|c| c.query_row("SELECT updated_at FROM app_state WHERE id = 1", [], |r| r.get(0)))
+            .unwrap()
+    };
+
+    let db = Db::in_memory().unwrap();
+    let app = App::hydrate(db, 0).unwrap();
+    { *app.machine.lock() = seeded(); }
+    app.dispatch(Event::SwitchTo { task: "A".into() }, 1_000).unwrap();
+    let after_start = updated_at(&app.db);
+
+    // Mid-block: nothing expires, no pomodoro falls due, the open work span
+    // stays open. The reducer returns the state it was given.
+    app.dispatch(Event::Tick, 2_000).unwrap();
+    app.dispatch(Event::Tick, 3_000).unwrap();
+    assert_eq!(updated_at(&app.db), after_start, "a no-op tick is not persisted");
+    assert_eq!(app.snapshot().timer_state, TimerState::Running);
+
+    // The tick that *does* change something still writes — the saving must not
+    // have cost the thing the save is for.
+    app.dispatch(Event::Tick, 31 * MIN).unwrap();
+    assert_eq!(app.snapshot().timer_state, TimerState::AwaitingDecision);
+    assert_eq!(updated_at(&app.db), 31 * MIN, "the expiry is durable");
+    assert_eq!(
+        app.db.with(repo::load).unwrap().timer_state,
+        TimerState::AwaitingDecision,
+        "and reloads as the checkpoint it is"
+    );
+}

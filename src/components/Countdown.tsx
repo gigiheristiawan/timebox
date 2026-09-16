@@ -14,7 +14,12 @@ export function Countdown({ className = "" }: { className?: string }) {
 
   useEffect(() => {
     if (snap?.state.timerState !== "Running") return;
-    const id = setInterval(() => tick((n) => n + 1), 250);
+    // Once a second, not four times: the display's smallest unit is a second,
+    // so three of every four re-renders painted the digits already on screen —
+    // in every open window at once (issue #36). The backend's own 1 Hz nudge
+    // lands between these, which is what keeps the visible second from lagging
+    // the real one by a whole interval.
+    const id = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [snap?.state.timerState]);
 
