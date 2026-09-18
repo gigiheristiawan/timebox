@@ -12,6 +12,7 @@ All entries below are from a single working session on 2026-08-19. Hours before 
 
 | Date (WIB)       | Change                                                                                                                                                                          |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-18 15:12 | **§7.4 — the work checkpoint names the next task (issue #38).** An *Up next* line above the actions, from `Snapshot.nextTask`. `start_next` and the snapshot now share `MachineState::first_startable`, so the display cannot name a daily done today that rotation would step over. Test 109. |
 | 2026-09-16 13:41 | **§4.5, §6 — a no-op reduction is not persisted, and the 1 Hz nudge only reaches visible windows (issue #36).** Activity Monitor put the app at 13.3 Energy Impact while a block ran. Almost every tick changes nothing — `Event::Tick` mutates the state only on expiry or a Pomodoro falling due — yet `dispatch` rewrote every task, block and span in a transaction, 3600 times an hour, to store what was already there; and each `timebox://changed` cost *every* window a full `get_snapshot` and a whole-tree re-render, including the popover, the main window and the checkpoint while hidden. Neither changes a rule: a transition still writes before it is acknowledged, and a hidden window is caught up on focus. Test 108. |
 | 2026-09-14 15:26 | **§7.2 — the popover is 380px wide**, correcting the 340 below after a look at it running. |
 | 2026-09-14 15:22 | **§7.2 — the popover is 340px wide, up from 300**, so task titles truncate less. The stated "~320px" had drifted from the code's 300. Presentation only. |
@@ -332,6 +333,7 @@ A separate always-on-top, borderless, screen-filling window on the active displa
 
 - Blocks interaction with TimeBox's own UI only. It must **never** attempt to lock the Mac or block other applications.
 - Contents: `TIME'S UP`, task title, block duration worked, prompt, then a break-length selector and exactly five actions.
+- **Up next** — above the actions, the task *Start Next* would start: the first startable task in the queue other than this one, stepping over a daily done today. `Nothing else queued` when there is none. Computed in Rust (`Snapshot.nextTask`, `MachineState::first_startable`) by the same query `start_next` uses, so the name shown is the task started. Break-or-continue is a different decision depending on what follows (issue #38).
 - **Staleness line** — when more than 2 minutes have passed since the block expired, the checkpoint states how long it has been waiting (`This block ended 2h 14m ago`). The decision is often different when the block ended hours ago, and the user must not have to infer that.
 
 - **Break length** — a segmented control `5 / 10 / 15 / 30`, pre-set to `defaultBreakDurationSeconds`. It selects, it does not act. Its only job is to make the two break actions below single-click.

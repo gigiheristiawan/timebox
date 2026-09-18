@@ -1328,6 +1328,37 @@ mod daily {
         assert_eq!(done_last(&s.queue, &[]), stored);
     }
 
+    /// Test 109 — the checkpoint names what *Start Next* will start (issue
+    /// #38). It is a promise the next decision has to keep, so it is asserted
+    /// against the task each decision actually starts, over a daily done today
+    /// that a plain "queue after the current task" would have named instead.
+    #[test]
+    fn t109_checkpoint_names_the_task_start_next_starts() {
+        let (mut s, mut ids) = day();
+        s.tasks.iter_mut().find(|t| t.id == "B").unwrap().daily = true;
+        let s = fire(s, Event::SwitchTo { task: "B".into() }, 0, &mut ids);
+        let s = fire(s, Event::CompleteCurrentTask, MIN, &mut ids); // B done today
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 2 * MIN, &mut ids);
+        let s = fire(s, Event::Tick, 32 * MIN, &mut ids);
+        assert_eq!(s.timer_state, TimerState::AwaitingDecision, "fixture: at A's checkpoint");
+        assert_eq!(s.queue[1], "B", "fixture: the ticked daily sits right after A");
+
+        let shown = s.first_startable(DAY, s.current_task().map(|t| &t.id)).cloned();
+        assert_eq!(shown.as_deref(), Some("C"), "steps over the daily done today");
+        for decide in [Event::DecideComplete, Event::DecidePending] {
+            let after = fire(s.clone(), decide, 33 * MIN, &mut ids);
+            assert_eq!(after.current_task().map(|t| t.id.clone()), shown, "shown is started");
+        }
+
+        // Nothing else startable: the checkpoint says so rather than naming
+        // the task it is deciding about.
+        let (mut s, mut ids) = day();
+        s.queue.truncate(1);
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+        assert_eq!(s.first_startable(DAY, s.current_task().map(|t| &t.id)), None);
+    }
+
     /// Test 55 — done for today means *inert*, not merely deprioritised.
     /// Rotation must step over it, or completing the queue head would restart
     /// the task that was just ticked off.
