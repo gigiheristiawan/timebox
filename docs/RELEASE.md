@@ -3,9 +3,9 @@
 How to produce a distributable TimeBox build. Phase 8 of
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Current state:** **0.1.0 through 0.5.2 are published**, and **0.5.3 is in
-flight** — version bumped (build 12), notes written; the signed/notarized build
-has not been made yet.
+**Current state:** **0.1.0 through 0.5.2 are published**, and **0.6.0 is in
+flight** — version bumped (build 13), notes written; the signed/notarized build
+has not been made yet. 0.5.3 was bumped but never published; its fix ships in 0.6.0.
 The 0.1.0 DMG is attached to the [v0.1.0
 release](https://github.com/gigiheristiawan/timebox/releases/tag/v0.1.0) and the
 landing page is live at <https://gigiheristiawan.github.io/timebox/>. Everything
@@ -18,6 +18,7 @@ Pages) is done and marked as such where it appears.
 
 | Date (WIB)       | Change                                                                     |
 | ---------------- | -------------------------------------------------------------------------- |
+| 2026-09-18 16:36 | 0.6.0 bumped: the five files of §0 plus `CFBundleVersion` 12 → **13**. Notes in `docs/release-notes/0.6.0.md`. **0.5.3 was never published**, so 0.6.0 carries its fix (the 1 Hz tick loop, issue #36) as well as two changes since: the work checkpoint names the task *Up next* (issue #38), and declining the break at a task checkpoint resets the Pomodoro clock (issue #39). Minor rather than patch because both change what the checkpoint shows or does. No migration.
 | 2026-09-16 13:58 | 0.5.3 bumped: the five files of §0 plus `CFBundleVersion` 11 → **12**. Notes in `docs/release-notes/0.5.3.md`. A one-fix release — the 1 Hz tick loop rewriting the whole database, nudging hidden windows and redrawing the countdown four times a second, none of which anything read (issue #36). No migration, and nothing the app shows changes. |
 | 2026-09-14 15:31 | 0.5.2 bumped: the five files of §0 plus `CFBundleVersion` 10 → **11**. Notes in `docs/release-notes/0.5.2.md`. Three presentation changes since 0.5.1 — dailies done today listed last in the popover (issue #31), the `daily` badge on the popover and the overlay (issue #33), and the popover widened to 380px. No migration. |
 | 2026-09-10 11:52 | 0.5.1 bumped: the five files of §0 plus `CFBundleVersion` 9 → **10**. Notes in `docs/release-notes/0.5.1.md`. A one-fix release — the timer overlay never updating after the block it mounted with, and a running break showing today's idle total where the break countdown belongs (issue #27). No migration. |

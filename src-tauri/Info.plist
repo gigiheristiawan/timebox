@@ -22,13 +22,14 @@
          both from `version` in tauri.conf.json, but App Store Connect requires
          this one to increase on every upload — including after a build that
          failed processing, since the delivery is still registered. Bump it for
-         each submission; CFBundleShortVersionString stays 0.5.3.
+         each submission; CFBundleShortVersionString stays 0.6.0.
          Build 1 (0.1.0) was rejected: ITMS-91109, quarantine xattr.
          Build 3 was 0.2.0; build 4 was 0.3.0; build 5 was 0.3.1;
          build 6 was 0.3.2; build 7 was 0.4.0; build 8 was 0.4.1;
          build 9 was 0.5.0; build 10 was 0.5.1; build 11 was 0.5.2;
-         build 12 is 0.5.3. -->
+         build 12 was 0.5.3, never published — its fix ships in 0.6.0;
+         build 13 is 0.6.0. -->
     <key>CFBundleVersion</key>
-    <string>12</string>
+    <string>13</string>
 </dict>
 </plist>
