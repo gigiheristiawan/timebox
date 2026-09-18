@@ -128,6 +128,7 @@ export function Checkpoint() {
   }
 
   const task = currentTask(snap);
+  const upNext = snap.nextTask ? taskById(snap, snap.nextTask) : undefined;
   const extendedToday = snap.state.blocks
     .filter((b) => b.taskId === task?.id)
     .reduce((n, b) => n + b.extensionMs, 0);
@@ -148,6 +149,13 @@ export function Checkpoint() {
       )}
 
       <div className="mt-6 flex w-full max-w-[460px] flex-col gap-3">
+        <p className="flex items-baseline justify-center gap-2.5">
+          <span className="font-mono text-[11px] uppercase tracking-[0.13em] text-ink-3">Up next</span>
+          {upNext
+            ? <span className="max-w-[30ch] truncate text-lg font-semibold">{upNext.title}</span>
+            : <span className="text-lg text-ink-3">Nothing else queued</span>}
+        </p>
+
         <div className="grid grid-cols-[auto_1fr_1fr] items-center gap-2">
           <span />
           <Header>then start next</Header>

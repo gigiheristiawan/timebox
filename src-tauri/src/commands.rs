@@ -41,6 +41,10 @@ pub struct Snapshot {
     /// main window deliberately keeps `state.queue`: it is where the order is
     /// dragged, and a view that moved rows would fight the drag.
     pub popover_queue: Vec<crate::core::model::TaskId>,
+    /// The task *Start Next* would start, other than the one running — what
+    /// the work checkpoint shows so the break-or-continue choice is made
+    /// knowing what follows (issue #38). `None` when nothing else is startable.
+    pub next_task: Option<crate::core::model::TaskId>,
     /// Pomodoro mode, or `None` when it is off (issue #15). `remainingMs` is
     /// computed here for the same reason `summary` is: the UI must not sum
     /// spans or compare instants of its own (SPEC R7), and it never concludes
@@ -73,6 +77,9 @@ fn snapshot_of(app: &App) -> Snapshot {
     Snapshot {
         popover_queue: crate::core::queue::done_last(&state.queue, &done_today),
         done_today,
+        next_task: state
+            .first_startable(day_start, state.current_task().map(|t| &t.id))
+            .cloned(),
         remaining_ms: state.remaining_ms(now),
         launch_at_login_active,
         staleness_ms: state.staleness_ms(now),

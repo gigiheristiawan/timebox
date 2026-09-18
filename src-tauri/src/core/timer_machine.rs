@@ -138,6 +138,17 @@ impl MachineState {
         self.tasks.iter().find(|t| &t.id == tid)
     }
 
+    /// The first task in the queue that could start now, stepping over `skip`.
+    /// `start_next` asks with no skip; the checkpoint asks with the current task
+    /// to say what comes after it (issue #38). One query, so the name shown
+    /// and the task started cannot disagree.
+    pub fn first_startable(&self, day_start: Millis, skip: Option<&TaskId>) -> Option<&TaskId> {
+        self.queue.iter().find(|id| {
+            Some(*id) != skip
+                && self.tasks.iter().any(|t| &t.id == *id && t.is_startable(day_start))
+        })
+    }
+
     pub fn on_break(&self) -> bool {
         matches!(self.current_block(), Some(b) if b.kind == BlockKind::Break)
     }
@@ -852,16 +863,7 @@ fn start_next(
     ids: &mut dyn IdSource,
     fx: &mut Vec<Effect>,
 ) {
-    let next = state
-        .queue
-        .iter()
-        .find(|id| {
-            state
-                .tasks
-                .iter()
-                .any(|t| &&t.id == id && t.is_startable(day_start))
-        })
-        .cloned();
+    let next = state.first_startable(day_start, None).cloned();
     match next {
         Some(t) => start_task(state, &t, now, ids, fx),
         None => {
