@@ -314,6 +314,7 @@ pub fn reduce(
         Event::DecideComplete => {
             if at_work_checkpoint(&state) {
                 settle_away(&mut state, now);
+                decline_break(&mut state, now);
                 let t = state.current_task().map(|t| t.id.clone());
                 end_current(&mut state, BlockStatus::Completed, now);
                 if let Some(t) = t {
@@ -327,6 +328,7 @@ pub fn reduce(
         Event::DecidePending => {
             if at_work_checkpoint(&state) {
                 settle_away(&mut state, now);
+                decline_break(&mut state, now);
                 let t = state.current_task().map(|t| t.id.clone());
                 end_current(&mut state, BlockStatus::Completed, now);
                 if let Some(t) = t {
@@ -340,6 +342,7 @@ pub fn reduce(
         Event::DecideExtend { ms } => {
             if at_work_checkpoint(&state) && ms > 0 {
                 settle_away(&mut state, now);
+                decline_break(&mut state, now);
                 if let Some(id) = state.current_block_id.clone() {
                     if let Some(b) = state.block_mut(&id) {
                         b.extension_ms += ms;
@@ -738,6 +741,16 @@ fn unpark(state: &mut MachineState, id: &BlockId, now: Millis) {
         b.last_resume_at = Some(now);
         b.paused_at = None;
         b.status = BlockStatus::Running;
+    }
+}
+
+/// Answering a task checkpoint without its break option resets the pomodoro
+/// clock (issue #39, POMODORO_MODE D53). The checkpoint offered a break and it
+/// was declined — the same answer as *Skip & continue*, and a prompt a few
+/// minutes later would argue with it (D29).
+fn decline_break(state: &mut MachineState, now: Millis) {
+    if state.pomodoro_since.is_some() {
+        state.pomodoro_since = Some(now);
     }
 }
 

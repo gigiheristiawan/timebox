@@ -1784,6 +1784,38 @@ mod pomodoro {
         assert_eq!(status_of(&completed, "A"), TaskStatus::InProgress);
         assert_eq!(completed.current_block_id, at.current_block_id);
     }
+
+    /// Test 110 — a task checkpoint answered *without* its break resets the
+    /// clock (issue #39, D53). The break was offered and declined; without the
+    /// reset, 20m of banked work would re-prompt 5m later and ask again.
+    #[test]
+    fn t110_declining_the_break_at_a_task_checkpoint_resets_the_clock() {
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        // On at 10m, so the pomodoro is due at 35m and A's block expires first.
+        let s = fire(s, Event::SetPomodoroMode { on: true }, 10 * MIN, &mut ids);
+        let at = fire(s, Event::Tick, 30 * MIN, &mut ids);
+        assert_eq!(at.timer_state, TimerState::AwaitingDecision);
+        assert_eq!(at.pomodoro_elapsed_ms(30 * MIN), Some(20 * MIN));
+
+        for decision in [
+            Event::DecideComplete,
+            Event::DecidePending,
+            Event::DecideExtend { ms: 15 * MIN },
+        ] {
+            let s = fire(at.clone(), decision.clone(), 30 * MIN, &mut ids);
+            assert_eq!(s.pomodoro_elapsed_ms(30 * MIN), Some(0), "{decision:?} kept the old clock");
+            let s = fire(s, Event::Tick, 35 * MIN, &mut ids);
+            assert_eq!(s.timer_state, TimerState::Running, "{decision:?} re-prompted 5m later");
+        }
+
+        // With the mode off, declining a break does not switch it on.
+        let (s, mut ids) = day();
+        let s = fire(s, Event::SwitchTo { task: "A".into() }, 0, &mut ids);
+        let s = fire(s, Event::Tick, 30 * MIN, &mut ids);
+        let s = fire(s, Event::DecidePending, 30 * MIN, &mut ids);
+        assert_eq!(s.pomodoro_since, None);
+    }
 }
 
 mod report {
